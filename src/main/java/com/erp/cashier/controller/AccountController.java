@@ -1,0 +1,186 @@
+package com.erp.cashier.controller;
+
+import com.erp.cashier.dto.AccountOperationRequest;
+import com.erp.cashier.dto.AccountP2PTransferRequest;
+import com.erp.cashier.dto.AccountP2PTransferResponse;
+import com.erp.cashier.dto.AccountResponse;
+import com.erp.cashier.dto.AccountTransferResponse;
+import com.erp.cashier.dto.CreateCustomerRequest;
+import com.erp.cashier.dto.CreateCustomerResponse;
+import com.erp.cashier.dto.CustomerResponse;
+import com.erp.cashier.security.JwtPayload;
+import com.erp.cashier.service.AccountService;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+/**
+ * Account and customer endpoints.
+ *
+ * @author ERP Cashier Team
+ * @since 2025-01-20
+ */
+@RestController
+@RequestMapping("/api")
+public class AccountController {
+    private final AccountService accountService;
+
+    /**
+     * Creates the account controller.
+     *
+     * @param accountService account service
+     */
+    public AccountController(AccountService accountService) {
+        this.accountService = accountService;
+    }
+
+    /**
+     * Lists accounts for admin users.
+     *
+     * @return accounts
+     */
+    @GetMapping("/admin/accounts")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public Flux<AccountResponse> listAdminAccounts() {
+        return accountService.listAccounts();
+    }
+
+    /**
+     * Lists customers for admin users.
+     *
+     * @return customers
+     */
+    @GetMapping("/admin/customers")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public Flux<CustomerResponse> listAdminCustomers() {
+        return accountService.listCustomers();
+    }
+
+    /**
+     * Creates a customer.
+     *
+     * @param request create request
+     * @param authentication authentication payload
+     * @return created customer
+     */
+    @PostMapping("/admin/customers")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public Mono<CreateCustomerResponse> createCustomer(
+            @RequestBody CreateCustomerRequest request,
+            Authentication authentication
+    ) {
+        return accountService.createCustomer(request, resolveUserId(authentication));
+    }
+
+    /**
+     * Lists accounts for cashiers.
+     *
+     * @return accounts
+     */
+    @GetMapping("/cashier/accounts")
+    @PreAuthorize("hasAuthority('ROLE_CASHIER')")
+    public Flux<AccountResponse> listCashierAccounts() {
+        return accountService.listAccounts();
+    }
+
+    /**
+     * Lists customers for cashiers.
+     *
+     * @return customers
+     */
+    @GetMapping("/cashier/customers")
+    @PreAuthorize("hasAuthority('ROLE_CASHIER')")
+    public Flux<CustomerResponse> listCashierCustomers() {
+        return accountService.listCustomers();
+    }
+
+    /**
+     * Searches customers by query.
+     *
+     * @param query search query
+     * @return matching customers
+     */
+    @GetMapping("/customers/search")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_CASHIER')")
+    public Flux<CustomerResponse> searchCustomers(@RequestParam(value = "q", required = false) String query) {
+        return accountService.searchCustomers(query);
+    }
+
+    /**
+     * Deposits into an account.
+     *
+     * @param request operation request
+     * @param authentication authentication payload
+     * @return transfer response
+     */
+    @PostMapping("/accounts/transfer")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_CASHIER')")
+    public Mono<AccountTransferResponse> deposit(
+            @RequestBody AccountOperationRequest request,
+            Authentication authentication
+    ) {
+        return accountService.deposit(
+                request != null ? request.getAccountId() : null,
+                request != null ? request.getAmount() : null,
+                request != null ? request.getReference() : null,
+                request != null ? request.getTicketing() : null,
+                resolveUserId(authentication)
+        );
+    }
+
+    /**
+     * Withdraws from an account.
+     *
+     * @param request operation request
+     * @param authentication authentication payload
+     * @return transfer response
+     */
+    @PostMapping("/accounts/withdraw")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_CASHIER')")
+    public Mono<AccountTransferResponse> withdraw(
+            @RequestBody AccountOperationRequest request,
+            Authentication authentication
+    ) {
+        return accountService.withdraw(
+                request != null ? request.getAccountId() : null,
+                request != null ? request.getAmount() : null,
+                request != null ? request.getReference() : null,
+                request != null ? request.getTicketing() : null,
+                resolveUserId(authentication)
+        );
+    }
+
+    /**
+     * Transfers between accounts.
+     *
+     * @param request transfer request
+     * @param authentication authentication payload
+     * @return transfer response
+     */
+    @PostMapping("/accounts/transfer-p2p")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_CASHIER')")
+    public Mono<AccountP2PTransferResponse> transferP2P(
+            @RequestBody AccountP2PTransferRequest request,
+            Authentication authentication
+    ) {
+        return accountService.transferP2P(request, resolveUserId(authentication));
+    }
+
+    private String resolveUserId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getUserId();
+        }
+        return null;
+    }
+}

@@ -1,0 +1,89 @@
+spring:
+  devtools:
+    restart:
+      enabled: true
+    livereload:
+      enabled: true
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5433/erp_cashier
+    username: postgres
+    password: adminuser
+    properties:
+      preparedStatementCacheQueries: 0
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+server:
+  port: 8081
+
+app:
+  rt:
+    base-url: ${RT_COMOPS_BASE_URL:http://localhost:8080}
+  seed:
+    superadmin:
+      enabled: ${SEED_SUPERADMIN_ENABLED:true}
+      username: ${SEED_SUPERADMIN_USERNAME:superadmin@gmail.com}
+      password: ${SEED_SUPERADMIN_PASSWORD:qwerty}
+      first-name: ${SEED_SUPERADMIN_FIRST_NAME:Super Admin}
+  sync:
+    rt:
+      enabled: ${RT_SYNC_ENABLED:true}
+      fixed-delay: ${RT_SYNC_FIXED_DELAY:PT1H}
+      initial-delay: ${RT_SYNC_INITIAL_DELAY:PT1M}
+      sync-on-login: ${RT_SYNC_ON_LOGIN:false}
+      superadmin-email: ${RT_SYNC_SUPERADMIN_EMAIL:superadmin@gmail.com}
+      superadmin-password: ${RT_SYNC_SUPERADMIN_PASSWORD:qwerty}
+  external-stub:
+    enabled: true
+    require-organization-id: false
+    require-agency-id: false
+    organization:
+      exists: true
+      open: true
+    credentials:
+      valid: true
+    agency:
+      assigned: true
+      open: true
+    roles:
+      cashier: true
+      agency-admin: true
+      organization-admin: true
+      superadmin: true
+  external:
+    enabled: false
+    require-organization-id: false
+    require-agency-id: false
+    organization:
+      base-url: ""
+      exists-path: "/organizations/{organizationId}/exists"
+      open-path: "/organizations/{organizationId}/open"
+      exists-field: "exists"
+      open-field: "open"
+    credentials:
+      base-url: ""
+      validate-path: "/auth/validate"
+      valid-field: "valid"
+      role-field: "role"
+      role-type-field: "role_type"
+    agency:
+      base-url: ""
+      assigned-path: "/agencies/{agencyId}/assignments/{userId}"
+      open-path: "/agencies/{agencyId}/open"
+      assigned-field: "assigned"
+      open-field: "open"
+  jwt:
+    secret: ${APP_JWT_SECRET:dev-secret-change-me-please-32-chars-long}
+    issuer: ${APP_JWT_ISSUER:erp-cashier}
+    access-token-minutes: ${APP_JWT_ACCESS_TOKEN_MINUTES:1440}
+  thirdparty:
+    enabled: ${THIRDPARTY_ENABLED:true}
+    base-url: ${THIRDPARTY_BASE_URL:http://localhost:8082}
+    auth-path: ${THIRDPARTY_AUTH_PATH:/auth/login}
+    accounts-path: ${THIRDPARTY_ACCOUNTS_PATH:/api/v1/thirdparty-accounts}
+    email: ${THIRDPARTY_EMAIL:qwerty@gmail.com}
+    password: ${THIRDPARTY_PASSWORD:qwerty}
+    sync:
+      enabled: ${THIRDPARTY_SYNC_ENABLED:true}
+      fixed-delay: ${THIRDPARTY_SYNC_FIXED_DELAY:PT1H}
+      initial-delay: ${THIRDPARTY_SYNC_INITIAL_DELAY:PT1M}

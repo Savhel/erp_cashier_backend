@@ -1,0 +1,3020 @@
+openapi: "3.1.0"
+info:
+  title: "RT_ComOps API"
+  description: "RT_ComOps API"
+  version: "1.0.0"
+servers:
+  - url: "https://RT_ComOps"
+paths:
+  /actors/me:
+    put:
+      summary: "PUT actors/me"
+      operationId: "updateProfile"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessActor"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BusinessActor"
+    get:
+      summary: "GET actors/me"
+      operationId: "getMyProfile"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BusinessActor"
+  /actors/onboarding:
+    post:
+      summary: "POST actors/onboarding"
+      operationId: "onboardUser"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessActor"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BusinessActor"
+  /employees/invite:
+    post:
+      summary: "POST employees/invite"
+      operationId: "inviteEmployee"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteRequest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/OrganizationMember"
+  /employees/{id}:
+    delete:
+      summary: "DELETE employees/{id}"
+      operationId: "removeEmployee"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+  /employees:
+    get:
+      summary: "GET employees"
+      operationId: "getEmployees"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/OrganizationMember"
+  /employees/roles:
+    get:
+      summary: "GET employees/roles"
+      operationId: "getRoles"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Role"
+  /employees/{userId}/organizations:
+    get:
+      summary: "GET employees/{userId}/organizations"
+      operationId: "getUserOrganizations"
+      parameters:
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/OrganizationMembership"
+  /employees/{userId}/agency-managed-organizations:
+    get:
+      summary: "GET employees/{userId}/agency-managed-organizations"
+      operationId: "getAgencyManagedOrganizations"
+      parameters:
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/OrganizationMembership"
+  /warehouseTransfers:
+    post:
+      summary: "POST warehouseTransfers"
+      operationId: "createTransfer"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockMovement"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StockMovement"
+    get:
+      summary: "GET warehouseTransfers"
+      operationId: "getAllTransfers"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/StockMovement"
+  /inventories:
+    post:
+      summary: "POST inventories"
+      operationId: "create"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Inventory"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Inventory"
+    get:
+      summary: "GET inventories"
+      operationId: "getAll"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Inventory"
+  /inventories/{id}/validate:
+    post:
+      summary: "POST inventories/{id}/validate"
+      operationId: "validate"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Inventory"
+  /stockMovements:
+    post:
+      summary: "POST stockMovements"
+      operationId: "createDraft"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockMovement"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StockMovement"
+    get:
+      summary: "GET stockMovements"
+      operationId: "getAllMovements"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/StockMovement"
+  /stockMovements/{id}/validate:
+    post:
+      summary: "POST stockMovements/{id}/validate"
+      operationId: "validateMovement"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StockMovement"
+  /stockMovements/{id}:
+    get:
+      summary: "GET stockMovements/{id}"
+      operationId: "getMovementById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StockMovement"
+  /products/{id}:
+    patch:
+      summary: "PATCH products/{id}"
+      operationId: "updateProduct"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Product"
+    delete:
+      summary: "DELETE products/{id}"
+      operationId: "deleteProduct"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET products/{id}"
+      operationId: "getProductById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Product"
+  /products:
+    post:
+      summary: "POST products"
+      operationId: "createProduct"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Product"
+    get:
+      summary: "GET products"
+      operationId: "getAllProducts"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Product"
+  /productTransformations:
+    post:
+      summary: "POST productTransformations"
+      operationId: "create"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductTransformation"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProductTransformation"
+    get:
+      summary: "GET productTransformations"
+      operationId: "getAll"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/ProductTransformation"
+  /productTransformations/{id}/validate:
+    post:
+      summary: "POST productTransformations/{id}/validate"
+      operationId: "validate"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProductTransformation"
+  /generalOptions:
+    put:
+      summary: "PUT generalOptions"
+      operationId: "updateOptions"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppBusinessSettings"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AppBusinessSettings"
+    get:
+      summary: "GET generalOptions"
+      operationId: "getOptions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AppBusinessSettings"
+  /banking/statements/import:
+    post:
+      summary: "POST banking/statements/import"
+      operationId: "importStatement"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankStatement"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BankStatement"
+  /banking/accounts:
+    post:
+      summary: "POST banking/accounts"
+      operationId: "createAccount"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankAccount"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BankAccount"
+    get:
+      summary: "GET banking/accounts"
+      operationId: "getAccounts"
+      parameters:
+        - name: "agencyId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/BankAccount"
+  /banking/transactions:
+    post:
+      summary: "POST banking/transactions"
+      operationId: "recordTransaction"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankTransaction"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BankTransaction"
+  /banking/accounts/{id}:
+    get:
+      summary: "GET banking/accounts/{id}"
+      operationId: "getAccount"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/BankAccount"
+  /banking/accounts/{id}/transactions:
+    get:
+      summary: "GET banking/accounts/{id}/transactions"
+      operationId: "getHistory"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            format: "int32"
+            default: "50"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/BankTransaction"
+  /banking/reconciliation/auto/{accountId}:
+    post:
+      summary: "POST banking/reconciliation/auto/{accountId}"
+      operationId: "autoReconcile"
+      parameters:
+        - name: "accountId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+  /banking/reconciliation/manual:
+    post:
+      summary: "POST banking/reconciliation/manual"
+      operationId: "manualReconcile"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualReconcileRequest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+  /banking/checks:
+    post:
+      summary: "POST banking/checks"
+      operationId: "registerCheck"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Check"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Check"
+    get:
+      summary: "GET banking/checks"
+      operationId: "getReceivedChecks"
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "RECEIVED"
+              - "DEPOSITED"
+              - "CASHED"
+              - "REJECTED"
+              - "CANCELLED"
+            default: "RECEIVED"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Check"
+  /banking/checks/{id}/deposit:
+    post:
+      summary: "POST banking/checks/{id}/deposit"
+      operationId: "depositCheck"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "accountId"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Check"
+  /auth/login:
+    post:
+      summary: "POST auth/login"
+      operationId: "login"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+  /auth/register:
+    post:
+      summary: "POST auth/register"
+      operationId: "register"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/User"
+  /clients/{id}:
+    patch:
+      summary: "PATCH clients/{id}"
+      operationId: "updateClient"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Client"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Client"
+    delete:
+      summary: "DELETE clients/{id}"
+      operationId: "deleteClient"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET clients/{id}"
+      operationId: "getClientById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Client"
+  /clients:
+    post:
+      summary: "POST clients"
+      operationId: "createClient"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Client"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Client"
+    get:
+      summary: "GET clients"
+      operationId: "getAllClients"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Client"
+  /invoices/{id}:
+    patch:
+      summary: "PATCH invoices/{id}"
+      operationId: "updateInvoice"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Invoice"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Invoice"
+    delete:
+      summary: "DELETE invoices/{id}"
+      operationId: "deleteInvoice"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET invoices/{id}"
+      operationId: "getInvoiceById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Invoice"
+  /invoices:
+    post:
+      summary: "POST invoices"
+      operationId: "createInvoice"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Invoice"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Invoice"
+    get:
+      summary: "GET invoices"
+      operationId: "getAllInvoices"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Invoice"
+  /invoices/from-order/{orderId}:
+    post:
+      summary: "POST invoices/from-order/{orderId}"
+      operationId: "createFromOrder"
+      parameters:
+        - name: "orderId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Invoice"
+  /invoices/{id}/validate:
+    post:
+      summary: "POST invoices/{id}/validate"
+      operationId: "validateInvoice"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Invoice"
+  /orders/{id}:
+    patch:
+      summary: "PATCH orders/{id}"
+      operationId: "updateOrder"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Order"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Order"
+    delete:
+      summary: "DELETE orders/{id}"
+      operationId: "deleteOrder"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET orders/{id}"
+      operationId: "getOrderById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Order"
+  /orders:
+    post:
+      summary: "POST orders"
+      operationId: "createOrder"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Order"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Order"
+    get:
+      summary: "GET orders"
+      operationId: "getAllOrders"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Order"
+  /orders/{id}/confirm:
+    post:
+      summary: "POST orders/{id}/confirm"
+      operationId: "confirmOrder"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Order"
+  /orders/{id}/cancel:
+    post:
+      summary: "POST orders/{id}/cancel"
+      operationId: "cancelOrder"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Order"
+  /suppliers/{id}:
+    patch:
+      summary: "PATCH suppliers/{id}"
+      operationId: "updateSupplier"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Supplier"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Supplier"
+    delete:
+      summary: "DELETE suppliers/{id}"
+      operationId: "deleteSupplier"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET suppliers/{id}"
+      operationId: "getSupplierById"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Supplier"
+  /suppliers:
+    post:
+      summary: "POST suppliers"
+      operationId: "createSupplier"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Supplier"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Supplier"
+    get:
+      summary: "GET suppliers"
+      operationId: "getAllSuppliers"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Supplier"
+  /agencies/{agencyId}/schedule/regular:
+    put:
+      summary: "PUT agencies/{agencyId}/schedule/regular"
+      operationId: "updateRegularSchedule"
+      parameters:
+        - name: "agencyId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: "array"
+              items:
+                $ref: "#/components/schemas/OpeningHoursRule"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/OpeningHoursRule"
+  /agencies/{agencyId}/schedule/exceptions:
+    post:
+      summary: "POST agencies/{agencyId}/schedule/exceptions"
+      operationId: "addException"
+      parameters:
+        - name: "agencyId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpecialOpeningHours"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SpecialOpeningHours"
+  /agencies/{agencyId}/schedule/exceptions/{exceptionId}:
+    delete:
+      summary: "DELETE agencies/{agencyId}/schedule/exceptions/{exceptionId}"
+      operationId: "removeException"
+      parameters:
+        - name: "agencyId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "exceptionId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+  /agencies/{agencyId}/schedule:
+    get:
+      summary: "GET agencies/{agencyId}/schedule"
+      operationId: "getSchedule"
+      parameters:
+        - name: "agencyId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AgencySchedule"
+  /agencies/{agencyId}/schedule/status:
+    get:
+      summary: "GET agencies/{agencyId}/schedule/status"
+      operationId: "getStatus"
+      parameters:
+        - name: "agencyId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/OpenStatus"
+  /warehouses/{id}:
+    patch:
+      summary: "PATCH warehouses/{id}"
+      operationId: "updateWarehouse"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Agency"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Agency"
+    delete:
+      summary: "DELETE warehouses/{id}"
+      operationId: "deleteWarehouse"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    get:
+      summary: "GET warehouses/{id}"
+      operationId: "getWarehouse"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Agency"
+  /warehouses:
+    post:
+      summary: "POST warehouses"
+      operationId: "createWarehouse"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Agency"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Agency"
+    get:
+      summary: "GET warehouses"
+      operationId: "getAllWarehouses"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Agency"
+  /organizations/{id}:
+    patch:
+      summary: "PATCH organizations/{id}"
+      operationId: "updateOrganization"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Organization"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Organization"
+  /organizations:
+    post:
+      summary: "POST organizations"
+      operationId: "createOrganization"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Organization"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Organization"
+  /organizations/{id}/transfer/{newOwnerId}:
+    post:
+      summary: "POST organizations/{id}/transfer/{newOwnerId}"
+      operationId: "transferOwnership"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "newOwnerId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Organization"
+  /organizations/my:
+    get:
+      summary: "GET organizations/my"
+      operationId: "getMyOrganizations"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Organization"
+  /organizations/current:
+    get:
+      summary: "GET organizations/current"
+      operationId: "getCurrentOrganization"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Organization"
+  /pois:
+    post:
+      summary: "POST pois"
+      operationId: "createPoi"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PointOfInterest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PointOfInterest"
+    get:
+      summary: "GET pois"
+      operationId: "getAllPois"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/PointOfInterest"
+  /pois/link:
+    post:
+      summary: "POST pois/link"
+      operationId: "linkAgencyToPoi"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkRequest"
+        required: true
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+    delete:
+      summary: "DELETE pois/link"
+      operationId: "unlinkAgencyFromPoi"
+      parameters:
+        - name: "agencyId"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "poiId"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Void"
+components:
+  schemas:
+    Instant:
+      type: "object"
+      properties: { }
+    BusinessActor:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        businessId:
+          type: "string"
+          nullable: true
+        niu:
+          type: "string"
+          nullable: true
+        tradeRegistryNumber:
+          type: "string"
+          nullable: true
+        website:
+          type: "string"
+          nullable: true
+        contactPhone:
+          type: "string"
+          nullable: true
+        privateAddress:
+          type: "string"
+          nullable: true
+        businessAddress:
+          type: "string"
+          nullable: true
+        businessProfile:
+          type: "string"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    InviteRequest:
+      type: "object"
+      properties:
+        email:
+          type: "string"
+          nullable: true
+        roleId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        permissionIds:
+          type: "array"
+          nullable: true
+          items:
+            type: "string"
+            format: "uuid"
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+    OrganizationMember:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        userId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        userEmail:
+          type: "string"
+          nullable: true
+        userFirstName:
+          type: "string"
+          nullable: true
+        userLastName:
+          type: "string"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyName:
+          type: "string"
+          nullable: true
+        roleId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        roleName:
+          type: "string"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        joinedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    Void:
+      type: "object"
+      properties: { }
+    Permission:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        resource:
+          type: "string"
+          nullable: true
+        action:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+    Role:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        permissions:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/Permission"
+    OrganizationMembership:
+      type: "object"
+      properties:
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationName:
+          type: "string"
+          nullable: true
+        roleId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        roleName:
+          type: "string"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyName:
+          type: "string"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        joinedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    BigDecimal:
+      type: "object"
+      properties: { }
+    StockMovementItem:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productName:
+          type: "string"
+          nullable: true
+        productCode:
+          type: "string"
+          nullable: true
+        quantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        costPrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+    StockMovement:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+          enum:
+            - "IN"
+            - "OUT"
+            - "TRANSFER"
+            - "ADJUSTMENT"
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "DRAFT"
+            - "VALIDATED"
+            - "CANCELLED"
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        sourceAgencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        destinationAgencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        thirdPartyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        notes:
+          type: "string"
+          nullable: true
+        createdBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        validatedBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        validatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        items:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/StockMovementItem"
+    InventoryItem:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productName:
+          type: "string"
+          nullable: true
+        theoreticalQuantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        physicalQuantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        variance:
+          type: "integer"
+          format: "int32"
+          nullable: true
+    Inventory:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "DRAFT"
+            - "VALIDATED"
+            - "CANCELLED"
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        description:
+          type: "string"
+          nullable: true
+        items:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/InventoryItem"
+        validatedBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        validatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    Product:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        code:
+          type: "string"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        family:
+          type: "string"
+          nullable: true
+        costPrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        salePrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        wholesalePrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        minStock:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        maxStock:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        threshold:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        purchaseUnit:
+          type: "string"
+          nullable: true
+        saleUnit:
+          type: "string"
+          nullable: true
+        isPerishable:
+          type: "boolean"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    TransformationItem:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+          enum:
+            - "INPUT"
+            - "OUTPUT"
+        quantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+    ProductTransformation:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "DRAFT"
+            - "VALIDATED"
+            - "CANCELLED"
+        description:
+          type: "string"
+          nullable: true
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        inputs:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TransformationItem"
+        outputs:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TransformationItem"
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    AppBusinessSettings:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        tenantId:
+          type: "string"
+          nullable: true
+        negotiateSellingPrice:
+          type: "boolean"
+          nullable: true
+        sellingPriceIncludeVat:
+          type: "boolean"
+          nullable: true
+        authorizeExceptionalDiscount:
+          type: "boolean"
+          nullable: true
+        grantableDiscountRate:
+          type: "number"
+          format: "double"
+          nullable: true
+        isPrintLogo:
+          type: "boolean"
+          nullable: true
+        paperFormat:
+          type: "string"
+          nullable: true
+        lengthOfVatInvoiceNumber:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        prefixOfVatInvoiceNumber:
+          type: "string"
+          nullable: true
+        lowStockAlert:
+          type: "boolean"
+          nullable: true
+        preventiveMaintenanceAlert:
+          type: "boolean"
+          nullable: true
+    StatementLine:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        statementId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        date:
+          type: "string"
+          format: "date"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        debit:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        credit:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        isReconciled:
+          type: "boolean"
+          nullable: true
+    BankStatement:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        accountId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        startDate:
+          type: "string"
+          format: "date"
+          nullable: true
+        endDate:
+          type: "string"
+          format: "date"
+          nullable: true
+        startBalance:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        endBalance:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        status:
+          type: "string"
+          nullable: true
+        importedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        lines:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/StatementLine"
+    BankAccount:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        bankId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        accountNumber:
+          type: "string"
+          nullable: true
+        currency:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+          enum:
+            - "BANK"
+            - "CASH"
+            - "MOBILE_MONEY"
+        balance:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        isActive:
+          type: "boolean"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    BankTransaction:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        accountId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        valueDate:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        reference:
+          type: "string"
+          nullable: true
+        externalReference:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        amount:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        balanceAfter:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        typeId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "PENDING"
+            - "CLEARED"
+            - "RECONCILED"
+            - "CANCELLED"
+        paymentId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        createdBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+    ManualReconcileRequest:
+      type: "object"
+      properties:
+        transactionId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        statementLineId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+    Check:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        accountId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        checkNumber:
+          type: "string"
+          nullable: true
+        amount:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        beneficiary:
+          type: "string"
+          nullable: true
+        issuer:
+          type: "string"
+          nullable: true
+        issueDate:
+          type: "string"
+          format: "date"
+          nullable: true
+        dueDate:
+          type: "string"
+          format: "date"
+          nullable: true
+        direction:
+          type: "string"
+          nullable: true
+          enum:
+            - "IN"
+            - "OUT"
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "RECEIVED"
+            - "DEPOSITED"
+            - "CASHED"
+            - "REJECTED"
+            - "CANCELLED"
+        transactionId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        notes:
+          type: "string"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    AuthRequest:
+      type: "object"
+      properties:
+        email:
+          type: "string"
+          nullable: true
+        password:
+          type: "string"
+          nullable: true
+    User:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        password:
+          type: "string"
+          nullable: true
+        firstName:
+          type: "string"
+          nullable: true
+        lastName:
+          type: "string"
+          nullable: true
+        businessActorId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        roles:
+          type: "array"
+          nullable: true
+          items:
+            type: "string"
+    AuthResponse:
+      type: "object"
+      properties:
+        token:
+          type: "string"
+          nullable: true
+        user:
+          nullable: true
+          $ref: "#/components/schemas/User"
+    RegisterRequest:
+      type: "object"
+      properties:
+        firstName:
+          type: "string"
+          nullable: true
+        lastName:
+          type: "string"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        company:
+          type: "string"
+          nullable: true
+        password:
+          type: "string"
+          nullable: true
+    Client:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        code:
+          type: "string"
+          nullable: true
+        companyName:
+          type: "string"
+          nullable: true
+        address:
+          type: "string"
+          nullable: true
+        city:
+          type: "string"
+          nullable: true
+        country:
+          type: "string"
+          nullable: true
+        phone:
+          type: "string"
+          nullable: true
+        fax:
+          type: "string"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        website:
+          type: "string"
+          nullable: true
+        contactPerson:
+          type: "string"
+          nullable: true
+        legalForm:
+          type: "string"
+          nullable: true
+        clientFamily:
+          type: "string"
+          nullable: true
+        clientType:
+          type: "string"
+          nullable: true
+        paymentTerms:
+          type: "string"
+          nullable: true
+        balance:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        notes:
+          type: "string"
+          nullable: true
+        pricingLevels:
+          type: "array"
+          nullable: true
+          items:
+            type: "string"
+        isTaxable:
+          type: "boolean"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    InvoiceItem:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        quantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        unitPrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        tvaRate:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalHt:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+    Invoice:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        orderId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+          enum:
+            - "SALE"
+            - "PURCHASE"
+            - "AVOIR"
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "DRAFT"
+            - "VALIDATED"
+            - "PAID"
+            - "PARTIALLY_PAID"
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        dueDate:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        thirdPartyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        totalHt:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalTva:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalTtc:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        amountPaid:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        balanceDue:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        notes:
+          type: "string"
+          nullable: true
+        items:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/InvoiceItem"
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    OrderItem:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        productName:
+          type: "string"
+          nullable: true
+        quantity:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        unitPrice:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        discount:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        tvaRate:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalHt:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+    Order:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        reference:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+          enum:
+            - "SALE"
+            - "PURCHASE"
+        status:
+          type: "string"
+          nullable: true
+          enum:
+            - "DRAFT"
+            - "CONFIRMED"
+            - "DELIVERED"
+            - "CANCELLED"
+            - "INVOICED"
+        date:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        deliveryDate:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        thirdPartyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        totalHt:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalTva:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalTtc:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        totalDiscount:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        notes:
+          type: "string"
+          nullable: true
+        paymentMethod:
+          type: "string"
+          nullable: true
+        createdBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        validatedBy:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        items:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/OrderItem"
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    Supplier:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        code:
+          type: "string"
+          nullable: true
+        companyName:
+          type: "string"
+          nullable: true
+        contactPerson:
+          type: "string"
+          nullable: true
+        phone:
+          type: "string"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        balance:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        notes:
+          type: "string"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    TimeInterval:
+      type: "object"
+      properties:
+        startTime:
+          type: "string"
+          format: "partial-time"
+          nullable: true
+        endTime:
+          type: "string"
+          format: "partial-time"
+          nullable: true
+    OpeningHoursRule:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        dayOfWeek:
+          type: "string"
+          nullable: true
+          enum:
+            - "MONDAY"
+            - "TUESDAY"
+            - "WEDNESDAY"
+            - "THURSDAY"
+            - "FRIDAY"
+            - "SATURDAY"
+            - "SUNDAY"
+        isClosed:
+          type: "boolean"
+          nullable: true
+        intervals:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TimeInterval"
+    SpecialOpeningHours:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        date:
+          type: "string"
+          format: "date"
+          nullable: true
+        label:
+          type: "string"
+          nullable: true
+        isClosed:
+          type: "boolean"
+          nullable: true
+        intervals:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TimeInterval"
+    AgencySchedule:
+      type: "object"
+      properties:
+        agencyName:
+          type: "string"
+          nullable: true
+        timezone:
+          type: "string"
+          nullable: true
+        regularRules:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/OpeningHoursRule"
+        upcomingExceptions:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/SpecialOpeningHours"
+    OpenStatus:
+      type: "object"
+      properties:
+        isOpen:
+          type: "boolean"
+          nullable: true
+        status:
+          type: "string"
+          nullable: true
+    PointOfInterest:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        mediaUri:
+          type: "string"
+          nullable: true
+        latitude:
+          type: "number"
+          format: "double"
+          nullable: true
+        longitude:
+          type: "number"
+          format: "double"
+          nullable: true
+        distanceMeters:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        relationDescription:
+          type: "string"
+          nullable: true
+    Agency:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        organizationId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        code:
+          type: "string"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        shortName:
+          type: "string"
+          nullable: true
+        longName:
+          type: "string"
+          nullable: true
+        type:
+          type: "string"
+          nullable: true
+        location:
+          type: "string"
+          nullable: true
+        address:
+          type: "string"
+          nullable: true
+        city:
+          type: "string"
+          nullable: true
+        country:
+          type: "string"
+          nullable: true
+        latitude:
+          type: "number"
+          format: "double"
+          nullable: true
+        longitude:
+          type: "number"
+          format: "double"
+          nullable: true
+        timezone:
+          type: "string"
+          nullable: true
+        ownerId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        managerId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        transferable:
+          type: "boolean"
+          nullable: true
+        isHeadquarter:
+          type: "boolean"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        isPublic:
+          type: "boolean"
+          nullable: true
+        isBusiness:
+          type: "boolean"
+          nullable: true
+        isIndividualBusiness:
+          type: "boolean"
+          nullable: true
+        logoUri:
+          type: "string"
+          nullable: true
+        logoId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        phone:
+          type: "string"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        whatsapp:
+          type: "string"
+          nullable: true
+        socialNetwork:
+          type: "string"
+          nullable: true
+        website:
+          type: "string"
+          nullable: true
+        greetingMessage:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        openTime:
+          type: "string"
+          nullable: true
+        closeTime:
+          type: "string"
+          nullable: true
+        averageRevenue:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        capitalShare:
+          nullable: true
+          $ref: "#/components/schemas/BigDecimal"
+        registrationNumber:
+          type: "string"
+          nullable: true
+        taxNumber:
+          type: "string"
+          nullable: true
+        keywords:
+          type: "array"
+          nullable: true
+          items:
+            type: "string"
+        totalAffiliatedCustomers:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        nearbyPoints:
+          type: "array"
+          nullable: true
+          items:
+            $ref: "#/components/schemas/PointOfInterest"
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    Organization:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        businessActorId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        code:
+          type: "string"
+          nullable: true
+        name:
+          type: "string"
+          nullable: true
+        serviceType:
+          type: "string"
+          nullable: true
+        isIndividualBusiness:
+          type: "boolean"
+          nullable: true
+        status:
+          type: "string"
+          nullable: true
+        managerId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        email:
+          type: "string"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
+        logoUri:
+          type: "string"
+          nullable: true
+        logoId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        websiteUrl:
+          type: "string"
+          nullable: true
+        socialNetwork:
+          type: "string"
+          nullable: true
+        businessRegistrationNumber:
+          type: "string"
+          nullable: true
+        taxNumber:
+          type: "string"
+          nullable: true
+        capitalShare:
+          type: "number"
+          format: "double"
+          nullable: true
+        ceoName:
+          type: "string"
+          nullable: true
+        yearFounded:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        foundingDate:
+          type: "string"
+          format: "date"
+          nullable: true
+        legalForm:
+          type: "string"
+          nullable: true
+        keywords:
+          type: "string"
+          nullable: true
+        numberOfEmployees:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        isActive:
+          type: "boolean"
+          nullable: true
+        createdAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          nullable: true
+          $ref: "#/components/schemas/Instant"
+    LinkRequest:
+      type: "object"
+      properties:
+        agencyId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        poiId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        distanceMeters:
+          type: "integer"
+          format: "int32"
+          nullable: true
+        description:
+          type: "string"
+          nullable: true
