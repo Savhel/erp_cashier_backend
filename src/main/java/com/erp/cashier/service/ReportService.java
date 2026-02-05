@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -240,15 +241,16 @@ public class ReportService {
 
         Mono<List<MovementRow>> movementsMono = sessionMono
                 .flatMap(info -> fetchSessionMovements(info.id(), MOVEMENT_LIMIT).collectList());
-        Mono<ReconciliationRow> reconciliationMono = sessionMono
+        Mono<Optional<ReconciliationRow>> reconciliationMono = sessionMono
                 .flatMap(info -> fetchReconciliation(info.id()))
-                .defaultIfEmpty(null);
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
 
         return Mono.zip(sessionMono, movementsMono, reconciliationMono)
                 .flatMap(tuple -> {
                     SessionInfo info = tuple.getT1();
                     List<MovementRow> movements = tuple.getT2();
-                    ReconciliationRow reconciliation = tuple.getT3();
+                    ReconciliationRow reconciliation = tuple.getT3().orElse(null);
                     ReportHeader header = new ReportHeader(info.organizationName(), info.agencyName());
                     byte[] pdf = buildSessionPdf(header, info, movements, reconciliation, MOVEMENT_LIMIT);
                     Map<String, Object> payload = new LinkedHashMap<>();

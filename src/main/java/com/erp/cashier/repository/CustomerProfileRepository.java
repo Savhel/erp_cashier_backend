@@ -20,4 +20,13 @@ public interface CustomerProfileRepository extends ReactiveCrudRepository<Custom
      * @return matching profile
      */
     Mono<CustomerProfile> findByPersonId(String personId);
+
+    /**
+     * Finds a customer profile by person identifier and profession.
+     *
+     * @param personId person identifier
+     * @param profession profile profession
+     * @return matching profile
+     */
+    Mono<CustomerProfile> findByPersonIdAndProfession(String personId, String profession);
 }

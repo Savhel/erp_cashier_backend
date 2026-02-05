@@ -10,6 +10,7 @@ import com.erp.cashier.model.CashierAgencyAssignment;
 import com.erp.cashier.repository.CashierAgencyAssignmentRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -30,19 +31,23 @@ import reactor.core.publisher.Mono;
 public class AssignmentService {
     private final R2dbcEntityTemplate entityTemplate;
     private final CashierAgencyAssignmentRepository assignmentRepository;
+    private final AuditService auditService;
 
     /**
      * Creates the assignment service.
      *
      * @param entityTemplate entity template
      * @param assignmentRepository assignment repository
+     * @param auditService audit service
      */
     public AssignmentService(
             R2dbcEntityTemplate entityTemplate,
-            CashierAgencyAssignmentRepository assignmentRepository
+            CashierAgencyAssignmentRepository assignmentRepository,
+            AuditService auditService
     ) {
         this.entityTemplate = entityTemplate;
         this.assignmentRepository = assignmentRepository;
+        this.auditService = auditService;
     }
 
     /**
@@ -232,6 +237,7 @@ public class AssignmentService {
         return assertAgencyScope(agencyId, organizationId, restrictToOrganization)
                 .then(assertNoOverlappingAssignment(cashierId, startOn, endOn))
                 .then(entityTemplate.insert(CashierAgencyAssignment.class).using(assignment))
+                .then(recordAgencyAssignmentEvent("assignation_agence", assignment, assignedBy))
                 .then(fetchAssignment(assignment.getId()));
     }
 
@@ -239,6 +245,7 @@ public class AssignmentService {
      * Ends a cashier agency assignment.
      *
      * @param assignmentId assignment identifier
+     * @param actorId authenticated user identifier
      * @param organizationId organization identifier
      * @param agencyScopeId agency identifier when scoped
      * @param restrictToOrganization true when scoped to an organization
@@ -247,6 +254,7 @@ public class AssignmentService {
      */
     public Mono<Void> endCashierAgencyAssignment(
             String assignmentId,
+            String actorId,
             String organizationId,
             String agencyScopeId,
             boolean restrictToOrganization,
@@ -284,10 +292,50 @@ public class AssignmentService {
                             )))
                             .flatMap(existing -> {
                                 existing.setEndOn(LocalDateTime.now());
-                                return assignmentRepository.save(existing).then();
+                                return assignmentRepository.save(existing)
+                                        .then(recordAgencyAssignmentEvent(
+                                                "fin_assignation_agence",
+                                                existing,
+                                                actorId
+                                        ));
                             });
                 })
                 .then();
+    }
+
+    private Mono<Void> recordAgencyAssignmentEvent(
+            String type,
+            CashierAgencyAssignment assignment,
+            String authorId
+    ) {
+        if (assignment == null) {
+            return Mono.empty();
+        }
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        putIfPresent(payload, "assignment_id", assignment.getId());
+        putIfPresent(payload, "cashier_id", assignment.getCashierId());
+        putIfPresent(payload, "agency_id", assignment.getAgencyId());
+        putIfPresent(payload, "start_on", assignment.getStartOn());
+        putIfPresent(payload, "end_on", assignment.getEndOn());
+        putIfPresent(payload, "assigned_on", assignment.getAssignedOn());
+        putIfPresent(payload, "assigned_by", assignment.getAssignedBy());
+        return auditService.recordSubjectEvent(
+                type,
+                trimToNull(authorId),
+                null,
+                null,
+                "cashier_agency_assignment",
+                assignment.getId(),
+                "assignment:agency:" + assignment.getId(),
+                payload
+        ).onErrorResume(ex -> Mono.empty());
+    }
+
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (payload == null || !StringUtils.hasText(key) || value == null) {
+            return;
+        }
+        payload.put(key, value);
     }
 
     private Mono<Void> assertAgencyScope(

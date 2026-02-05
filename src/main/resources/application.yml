@@ -17,6 +17,13 @@ server:
   port: 8081
 
 app:
+  r2dbc:
+    rt:
+      pool:
+        max-size: 10
+    thirdparty:
+      pool:
+        max-size: 10
   rt:
     base-url: ${RT_COMOPS_BASE_URL:http://localhost:8080}
   seed:
@@ -25,6 +32,8 @@ app:
       username: ${SEED_SUPERADMIN_USERNAME:superadmin@gmail.com}
       password: ${SEED_SUPERADMIN_PASSWORD:qwerty}
       first-name: ${SEED_SUPERADMIN_FIRST_NAME:Super Admin}
+    bills:
+      enabled: ${SEED_BILLS_ENABLED:true}
   sync:
     rt:
       enabled: ${RT_SYNC_ENABLED:true}
@@ -80,10 +89,20 @@ app:
     enabled: ${THIRDPARTY_ENABLED:true}
     base-url: ${THIRDPARTY_BASE_URL:http://localhost:8082}
     auth-path: ${THIRDPARTY_AUTH_PATH:/auth/login}
-    accounts-path: ${THIRDPARTY_ACCOUNTS_PATH:/api/v1/thirdparty-accounts}
+    accounts-path: ${THIRDPARTY_ACCOUNTS_PATH:/api/v1/thirdparty-accounts/by-agencies}
     email: ${THIRDPARTY_EMAIL:qwerty@gmail.com}
     password: ${THIRDPARTY_PASSWORD:qwerty}
     sync:
       enabled: ${THIRDPARTY_SYNC_ENABLED:true}
       fixed-delay: ${THIRDPARTY_SYNC_FIXED_DELAY:PT1H}
       initial-delay: ${THIRDPARTY_SYNC_INITIAL_DELAY:PT1M}
+  accounting:
+    enabled: ${ACCOUNTING_SYNC_ENABLED:true}
+    base-url: ${ACCOUNTING_BASE_URL:https://yowyob-erp-backend-2duy.onrender.com}
+    cash-movements-path: ${ACCOUNTING_CASH_MOVEMENTS_PATH:/api/v1/accounting/cash-movements}
+    timeout-seconds: ${ACCOUNTING_TIMEOUT_SECONDS:5}
+  billing:
+    enabled: ${BILLING_ENABLED:true}
+    base-url: ${BILLING_BASE_URL:https://billing-f6l8.onrender.com}
+    all-bills-path: ${BILLING_ALL_BILLS_PATH:/all-bill}
+    timeout-seconds: ${BILLING_TIMEOUT_SECONDS:5}

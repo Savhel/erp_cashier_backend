@@ -128,6 +128,7 @@ public class AssignmentController {
         boolean restrictToAgency = StringUtils.hasText(agencyId);
         return assignmentService.endCashierAgencyAssignment(
                         assignmentId,
+                        resolveUserId(authentication),
                         organizationId,
                         agencyId,
                         restrictToOrganization,

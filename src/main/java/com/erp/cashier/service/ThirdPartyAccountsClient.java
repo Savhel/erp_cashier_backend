@@ -2,15 +2,20 @@ package com.erp.cashier.service;
 
 import com.erp.cashier.config.ThirdPartyProperties;
 import com.erp.cashier.dto.external.ThirdPartyAccountResponse;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -22,13 +27,15 @@ import reactor.core.publisher.Mono;
  */
 @Service
 public class ThirdPartyAccountsClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ThirdPartyAccountsClient.class);
     private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
             new ParameterizedTypeReference<>() {};
-    private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP_TYPE =
-            new ParameterizedTypeReference<>() {};
+    private static final TypeReference<List<Map<String, Object>>> LIST_MAP_TYPE =
+            new TypeReference<>() {};
 
     private final WebClient webClient;
     private final ThirdPartyProperties properties;
+    private final ObjectMapper objectMapper;
 
     /**
      * Creates the third-party accounts client.
@@ -36,9 +43,14 @@ public class ThirdPartyAccountsClient {
      * @param webClientBuilder web client builder
      * @param properties third-party properties
      */
-    public ThirdPartyAccountsClient(WebClient.Builder webClientBuilder, ThirdPartyProperties properties) {
+    public ThirdPartyAccountsClient(
+            WebClient.Builder webClientBuilder,
+            ThirdPartyProperties properties,
+            ObjectMapper objectMapper
+    ) {
         this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl()).build();
         this.properties = properties;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -79,25 +91,34 @@ public class ThirdPartyAccountsClient {
     }
 
     /**
-     * Lists third-party accounts for the tenant.
+     * Lists third-party accounts for the provided agencies.
      *
      * @param token bearer token
-     * @param tenantId tenant identifier
+     * @param agencyIds agency identifiers
      * @return accounts
      */
-    public Flux<ThirdPartyAccountResponse> listAccounts(String token, String tenantId) {
+    public Flux<ThirdPartyAccountResponse> listAccountsByAgencies(String token, List<String> agencyIds) {
         if (!StringUtils.hasText(token)) {
             return Flux.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Third-party token is required."));
         }
-        if (!StringUtils.hasText(tenantId)) {
-            return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant identifier is required."));
+        if (agencyIds == null || agencyIds.isEmpty()) {
+            return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Agency identifiers are required."));
         }
-        return webClient.get()
+        List<String> sanitized = agencyIds.stream()
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (sanitized.isEmpty()) {
+            return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Agency identifiers are required."));
+        }
+        Map<String, Object> payload = Map.of("agencyIds", sanitized);
+        return webClient.post()
                 .uri(properties.getAccountsPath())
+                .contentType(MediaType.APPLICATION_JSON)
                 .headers(headers -> {
                     headers.setBearerAuth(token);
-                    headers.add("X-Tenant-ID", tenantId);
                 })
+                .bodyValue(payload)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, response -> response.bodyToMono(String.class)
                         .defaultIfEmpty("")
@@ -106,7 +127,20 @@ public class ThirdPartyAccountsClient {
                                 "Third-party accounts lookup failed: " + body
                         )))
                 )
-                .bodyToMono(LIST_MAP_TYPE)
+                .bodyToMono(String.class)
+                .defaultIfEmpty("[]")
+                .doOnNext(raw -> LOGGER.info("Third-party accounts raw response:\n{}", raw))
+                .flatMap(raw -> {
+                    try {
+                        return Mono.just(objectMapper.readValue(raw, LIST_MAP_TYPE));
+                    } catch (Exception ex) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_GATEWAY,
+                                "Third-party accounts parsing failed: " + ex.getMessage(),
+                                ex
+                        ));
+                    }
+                })
                 .flatMapMany(Flux::fromIterable)
                 .map(this::mapAccount);
     }
@@ -117,7 +151,11 @@ public class ThirdPartyAccountsClient {
             return response;
         }
         response.setId(stringValue(payload.get("id")));
-        response.setTenantId(stringValue(payload.get("tenantId")));
+        Object tenantId = payload.get("tenantId");
+        if (tenantId == null) {
+            tenantId = payload.get("tenant_id");
+        }
+        response.setTenantId(stringValue(tenantId));
         response.setCode(stringValue(payload.get("code")));
         response.setName(stringValue(payload.get("name")));
         response.setAccountingAccount(stringValue(payload.get("accountingAccount")));

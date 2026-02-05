@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ import reactor.core.publisher.Mono;
 @Service
 public class RtSyncScheduler {
     private static final Logger LOGGER = LoggerFactory.getLogger(RtSyncScheduler.class);
+    private static final int ORG_SYNC_CONCURRENCY = 1;
 
     private final RtSyncProperties properties;
     private final RtComOpsClient rtComOpsClient;
@@ -50,7 +52,7 @@ public class RtSyncScheduler {
             RtComOpsClient rtComOpsClient,
             OrganizationSyncService organizationSyncService,
             RtSyncStateRepository syncStateRepository,
-            R2dbcEntityTemplate entityTemplate,
+            @Qualifier("rtEntityTemplate") R2dbcEntityTemplate entityTemplate,
             AuditService auditService
     ) {
         this.properties = properties;
@@ -77,40 +79,48 @@ public class RtSyncScheduler {
             return;
         }
         LOGGER.info("RT sync started.");
-        auditService.recordEvent("rt_sync_start", null, Map.of("message", "RT sync started"))
-                .onErrorResume(ex -> Mono.empty())
-                .subscribe();
         String email = StringUtils.trimWhitespace(properties.getSuperadminEmail());
         String password = properties.getSuperadminPassword();
-        if (!StringUtils.hasText(email) || !StringUtils.hasText(password)) {
-            running.set(false);
-            LOGGER.warn("RT sync skipped: missing superadmin credentials.");
-            auditService.recordEvent("rt_sync_skipped", null, Map.of("reason", "missing_credentials"))
-                    .onErrorResume(ex -> Mono.empty())
-                    .subscribe();
-            return;
-        }
 
-        rtComOpsClient.login(email, password)
-                .flatMapMany(this::syncFromLogin)
-                .doOnError(ex -> {
-                    LOGGER.error("RT sync failed.", ex);
-                    auditService.recordEvent(
-                                    "rt_sync_failed",
-                                    null,
-                                    Map.of("error", ex.getMessage())
-                            )
-                            .onErrorResume(inner -> Mono.empty())
-                            .subscribe();
+        Mono<Void> syncFlow = safeAudit("rt_sync_start", Map.of("message", "RT sync started"))
+                .then(Mono.defer(() -> {
+                    if (!StringUtils.hasText(email) || !StringUtils.hasText(password)) {
+                        LOGGER.warn("RT sync skipped: missing superadmin credentials.");
+                        return safeAudit("rt_sync_skipped", Map.of("reason", "missing_credentials"));
+                    }
+                    return rtComOpsClient.login(email, password)
+                            .flatMapMany(this::syncFromLogin)
+                            .then();
+                }))
+                .materialize()
+                .flatMap(signal -> {
+                    Mono<Void> failureAudit = Mono.empty();
+                    if (signal.isOnError()) {
+                        Throwable ex = signal.getThrowable();
+                        LOGGER.error("RT sync failed.", ex);
+                        failureAudit = safeAudit(
+                                "rt_sync_failed",
+                                Map.of("error", String.valueOf(ex != null ? ex.getMessage() : null))
+                        );
+                    }
+                    Mono<Void> finishedAudit = safeAudit(
+                            "rt_sync_finished",
+                            Map.of("signal", String.valueOf(signal.getType()))
+                    );
+                    if (signal.isOnError()) {
+                        Throwable ex = signal.getThrowable();
+                        return failureAudit
+                                .then(finishedAudit)
+                                .then(Mono.error(ex != null ? ex : new RuntimeException("RT sync failed")));
+                    }
+                    return failureAudit.then(finishedAudit);
                 })
                 .doFinally(signal -> {
                     running.set(false);
                     LOGGER.info("RT sync finished.");
-                    auditService.recordEvent("rt_sync_finished", null, Map.of("signal", String.valueOf(signal)))
-                            .onErrorResume(ex -> Mono.empty())
-                            .subscribe();
-                })
-                .subscribe();
+                });
+
+        syncFlow.subscribe();
     }
 
     private Flux<Void> syncFromLogin(RtAuthResponse response) {
@@ -126,17 +136,17 @@ public class RtSyncScheduler {
                 .collectList()
                 .flatMapMany(overviews -> {
                     LOGGER.info("RT sync fetched {} organization overviews.", overviews.size());
-                    auditService.recordEvent(
+                    return safeAudit(
                                     "rt_sync_overviews",
-                                    null,
                                     Map.of("count", overviews.size())
                             )
-                            .onErrorResume(ex -> Mono.empty())
-                            .subscribe();
-                    return Flux.fromIterable(overviews);
+                            .thenMany(Flux.fromIterable(overviews));
                 })
-                .doOnNext(this::logOverviewSummary)
-                .concatMap(overview -> syncOrganization(overview, userId));
+                .flatMap(
+                        overview -> logOverviewSummary(overview)
+                                .then(syncOrganization(overview, userId)),
+                        ORG_SYNC_CONCURRENCY
+                );
     }
 
     private Mono<Void> syncOrganization(Map<String, Object> overview, String actorId) {
@@ -151,25 +161,22 @@ public class RtSyncScheduler {
                 .switchIfEmpty(organizationSyncService
                         .syncOrganizationOverviewIncremental(overview, null, actorId))
                 .then(updateLastSyncedAt(organizationId))
-                .then(auditService.recordEvent(
+                .then(safeAudit(
                         "rt_sync_org_success",
-                        null,
                         Map.of("organization_id", organizationId)
                 ))
                 .doOnSuccess(ignored -> LOGGER.info("RT sync completed for organization {}", organizationId))
                 .onErrorResume(ex -> {
                     LOGGER.error("RT sync failed for organization {}", organizationId, ex);
-                    return auditService.recordEvent(
+                    return safeAudit(
                                     "rt_sync_org_failed",
-                                    null,
                                     Map.of(
                                             "organization_id",
                                             organizationId,
                                             "error",
-                                            ex.getMessage()
+                                            String.valueOf(ex.getMessage())
                                     )
                             )
-                            .onErrorResume(inner -> Mono.empty())
                             .then();
                 });
     }
@@ -196,7 +203,7 @@ public class RtSyncScheduler {
         return id != null ? String.valueOf(id) : null;
     }
 
-    private void logOverviewSummary(Map<String, Object> overview) {
+    private Mono<Void> logOverviewSummary(Map<String, Object> overview) {
         String orgId = extractOrganizationId(overview);
         int warehouses = countIterable(overview != null ? overview.get("warehouses") : null);
         int orgAdmins = countIterable(overview != null ? overview.get("orgAdmins") : null);
@@ -210,24 +217,21 @@ public class RtSyncScheduler {
                 cashiers,
                 agencyAdmins
         );
-        auditService.recordEvent(
-                        "rt_org_overview",
-                        null,
-                        Map.of(
-                                "organization_id",
-                                orgId,
-                                "warehouses",
-                                warehouses,
-                                "org_admins",
-                                orgAdmins,
-                                "cashiers",
-                                cashiers,
-                                "agency_admins",
-                                agencyAdmins
-                        )
+        return safeAudit(
+                "rt_org_overview",
+                Map.of(
+                        "organization_id",
+                        orgId,
+                        "warehouses",
+                        warehouses,
+                        "org_admins",
+                        orgAdmins,
+                        "cashiers",
+                        cashiers,
+                        "agency_admins",
+                        agencyAdmins
                 )
-                .onErrorResume(ex -> Mono.empty())
-                .subscribe();
+        );
     }
 
     private int countIterable(Object value) {
@@ -239,5 +243,10 @@ public class RtSyncScheduler {
             count++;
         }
         return count;
+    }
+
+    private Mono<Void> safeAudit(String type, Object payload) {
+        return auditService.recordEvent(type, null, payload)
+                .onErrorResume(ex -> Mono.empty());
     }
 }

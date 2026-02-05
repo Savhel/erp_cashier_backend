@@ -15,7 +15,6 @@ import com.erp.cashier.dto.CashRegisterUserResponse;
 import com.erp.cashier.dto.CreateCashRegisterRequest;
 import com.erp.cashier.dto.UpdateCashRegisterRequest;
 import com.erp.cashier.model.Agency;
-import com.erp.cashier.model.CashRegisterEvent;
 import com.erp.cashier.model.CashRegisterSession;
 import com.erp.cashier.model.CashierManageCashRegister;
 import com.erp.cashier.model.EventTicketingDetail;
@@ -32,6 +31,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -59,6 +59,7 @@ public class CashRegisterAdminService {
     private final R2dbcEntityTemplate entityTemplate;
     private final ObjectMapper objectMapper;
     private final TransactionalOperator transactionalOperator;
+    private final AuditService auditService;
 
     /**
      * Creates the cash register admin service.
@@ -68,19 +69,22 @@ public class CashRegisterAdminService {
      * @param entityTemplate entity template
      * @param objectMapper object mapper
      * @param transactionManager reactive transaction manager
+     * @param auditService audit service
      */
     public CashRegisterAdminService(
             CashRegisterRepository cashRegisterRepository,
             AgencyRepository agencyRepository,
             R2dbcEntityTemplate entityTemplate,
             ObjectMapper objectMapper,
-            ReactiveTransactionManager transactionManager
+            ReactiveTransactionManager transactionManager,
+            AuditService auditService
     ) {
         this.cashRegisterRepository = cashRegisterRepository;
         this.agencyRepository = agencyRepository;
         this.entityTemplate = entityTemplate;
         this.objectMapper = objectMapper;
         this.transactionalOperator = TransactionalOperator.create(transactionManager);
+        this.auditService = auditService;
     }
 
     /**
@@ -108,8 +112,6 @@ public class CashRegisterAdminService {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT r.id, r.town, r.country, r.neighborhood, r.adress, r.create_on, ");
         sql.append("r.ip_address, r.mac_address, r.min_open_time, r.max_close_time, r.is_active, ");
-        sql.append("r.sale_agent_bank_account, r.sale_agent_accounting_account, ");
-        sql.append("r.sale_agent_bank_account, r.sale_agent_accounting_account, ");
         sql.append("r.sale_agent_bank_account, r.sale_agent_accounting_account, ");
         sql.append("a.id AS agency_id, a.name AS agency_name, a.country AS agency_country, ");
         sql.append("a.town AS agency_town, a.neighborhood AS agency_neighborhood, ");
@@ -401,7 +403,7 @@ public class CashRegisterAdminService {
                             ? agencyRepository.findById(register.getAgencyId())
                             : Mono.empty();
 
-                    return agencyMono.defaultIfEmpty(null).flatMap(agency -> {
+                    return agencyMono.defaultIfEmpty(new Agency()).flatMap(agency -> {
                         if (restrictToOrganization) {
                             String resolvedOrgId = trimToNull(organizationScopeId);
                             if (!StringUtils.hasText(resolvedOrgId)) {
@@ -502,7 +504,7 @@ public class CashRegisterAdminService {
                     Mono<Agency> agencyMono = restrictToOrganization
                             ? agencyRepository.findById(register.getAgencyId())
                             : Mono.empty();
-                    return agencyMono.defaultIfEmpty(null).flatMap(agency -> {
+                    return agencyMono.defaultIfEmpty(new Agency()).flatMap(agency -> {
                         if (restrictToOrganization) {
                             String resolvedOrgId = trimToNull(organizationScopeId);
                             if (!StringUtils.hasText(resolvedOrgId)) {
@@ -600,7 +602,7 @@ public class CashRegisterAdminService {
                     Mono<Agency> agencyMono = restrictToOrganization
                             ? agencyRepository.findById(register.agencyId())
                             : Mono.empty();
-                    return agencyMono.defaultIfEmpty(null).flatMap(agency -> {
+                    return agencyMono.defaultIfEmpty(new Agency()).flatMap(agency -> {
                         if (restrictToOrganization) {
                             String resolvedOrgId = trimToNull(organizationScopeId);
                             if (!StringUtils.hasText(resolvedOrgId)) {
@@ -651,6 +653,7 @@ public class CashRegisterAdminService {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT r.id, r.town, r.country, r.neighborhood, r.adress, r.create_on, ");
         sql.append("r.ip_address, r.mac_address, r.min_open_time, r.max_close_time, r.is_active, ");
+        sql.append("r.sale_agent_bank_account, r.sale_agent_accounting_account, ");
         sql.append("a.id AS agency_id, a.name AS agency_name, a.country AS agency_country, ");
         sql.append("a.town AS agency_town, a.neighborhood AS agency_neighborhood, ");
         sql.append("p.user_name AS cashier_user_name, p.user_first_name AS cashier_user_first_name, ");
@@ -682,6 +685,7 @@ public class CashRegisterAdminService {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT r.id, r.town, r.country, r.neighborhood, r.adress, r.create_on, ");
         sql.append("r.ip_address, r.mac_address, r.min_open_time, r.max_close_time, r.is_active, ");
+        sql.append("r.sale_agent_bank_account, r.sale_agent_accounting_account, ");
         sql.append("r.agency_id, a.name AS agency_name, a.country AS agency_country, ");
         sql.append("a.town AS agency_town, a.neighborhood AS agency_neighborhood, ");
         sql.append("p.user_name AS cashier_user_name, p.user_first_name AS cashier_user_first_name ");
@@ -913,7 +917,21 @@ public class CashRegisterAdminService {
                                                         + calculatedTotal + " XAF"
                                         ));
                                     }
-                                    return insertOpeningEvent(savedSession.getId(), adminId, payload)
+                                    return insertOpeningEvent(
+                                                    savedSession.getId(),
+                                                    register.id(),
+                                                    cashierId,
+                                                    adminId,
+                                                    payload
+                                            )
+                                            .then(recordRegisterAssignmentEvent(
+                                                    assignment,
+                                                    register.id(),
+                                                    cashierId,
+                                                    adminId,
+                                                    savedSession.getId(),
+                                                    payload
+                                            ))
                                             .thenReturn(assignment);
                                 })
                 );
@@ -980,31 +998,83 @@ public class CashRegisterAdminService {
                 )));
     }
 
-    private Mono<Void> insertOpeningEvent(String sessionId, String adminId, String payload) {
-        CashRegisterEvent event = new CashRegisterEvent();
-        event.setId(UUID.randomUUID().toString());
-        event.setSessionId(sessionId);
-        event.setType("ouverture");
-        event.setAuthorId(adminId);
-        event.setPayload(payload);
-        event.setDateTime(LocalDateTime.now());
-        return entityTemplate.insert(CashRegisterEvent.class)
-                .using(event)
-                .then();
+    private Mono<Void> insertOpeningEvent(
+            String sessionId,
+            String registerId,
+            String cashierId,
+            String adminId,
+            String payload
+    ) {
+        if (!StringUtils.hasText(sessionId)) {
+            return Mono.empty();
+        }
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        putIfPresent(data, "session_id", sessionId);
+        putIfPresent(data, "cash_register_id", registerId);
+        putIfPresent(data, "cashier_id", cashierId);
+        putIfPresent(data, "initial_funds", payload);
+        return auditService.recordSubjectEvent(
+                "ouverture",
+                adminId,
+                sessionId,
+                null,
+                "session",
+                sessionId,
+                "session:" + sessionId + ":open",
+                data
+        ).onErrorResume(ex -> Mono.empty());
+    }
+
+    private Mono<Void> recordRegisterAssignmentEvent(
+            CashierManageCashRegister assignment,
+            String registerId,
+            String cashierId,
+            String adminId,
+            String sessionId,
+            String payload
+    ) {
+        if (assignment == null) {
+            return Mono.empty();
+        }
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        putIfPresent(data, "assignment_id", assignment.getId());
+        putIfPresent(data, "cash_register_id", registerId);
+        putIfPresent(data, "cashier_id", cashierId);
+        putIfPresent(data, "assigned_by", adminId);
+        putIfPresent(data, "session_id", sessionId);
+        putIfPresent(data, "initial_funds", payload);
+        return auditService.recordSubjectEvent(
+                "assignation_caisse",
+                adminId,
+                sessionId,
+                null,
+                "cash_register_assignment",
+                assignment.getId(),
+                "assignment:register:" + assignment.getId(),
+                data
+        ).onErrorResume(ex -> Mono.empty());
+    }
+
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (payload == null || !StringUtils.hasText(key) || value == null) {
+            return;
+        }
+        payload.put(key, value);
     }
 
     private Mono<CashRegisterSessionDetailResponse> enrichSession(CashRegisterSessionDetailResponse session) {
         Mono<List<CashRegisterMovementResponse>> movements = fetchMovements(session.getId()).collectList();
         Mono<List<CashRegisterTicketingDetailResponse>> ticketing = fetchTicketingDetails(session.getId())
                 .collectList();
-        Mono<CashRegisterReconciliationResponse> reconciliation = fetchReconciliation(session.getId())
-                .defaultIfEmpty(null);
+        Mono<Optional<CashRegisterReconciliationResponse>> reconciliation = fetchReconciliation(session.getId())
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
 
         return Mono.zip(movements, ticketing, reconciliation)
                 .map(tuple -> {
                     session.setMovements(tuple.getT1());
                     session.setTicketingDetails(tuple.getT2());
-                    session.setReconciliation(tuple.getT3());
+                    session.setReconciliation(tuple.getT3().orElse(null));
                     return session;
                 });
     }

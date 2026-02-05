@@ -22,6 +22,7 @@ public class AgencyResponse {
     private Boolean isActive;
     private Boolean requiresAdminAssignment;
     private String organizationId;
+    private String telegramBotToken;
     private LocalDateTime createOn;
     private Boolean hasBlockingSession;
     private List<AgencyCashRegisterResponse> cashRegisters;
@@ -45,6 +46,7 @@ public class AgencyResponse {
      * @param isActive active flag
      * @param requiresAdminAssignment assignment requirement
      * @param organizationId organization identifier
+     * @param telegramBotToken telegram bot token
      * @param createOn creation timestamp
      * @param hasBlockingSession blocking session flag
      * @param cashRegisters cash register summaries
@@ -60,6 +62,7 @@ public class AgencyResponse {
             Boolean isActive,
             Boolean requiresAdminAssignment,
             String organizationId,
+            String telegramBotToken,
             LocalDateTime createOn,
             Boolean hasBlockingSession,
             List<AgencyCashRegisterResponse> cashRegisters
@@ -74,6 +77,7 @@ public class AgencyResponse {
         this.isActive = isActive;
         this.requiresAdminAssignment = requiresAdminAssignment;
         this.organizationId = organizationId;
+        this.telegramBotToken = telegramBotToken;
         this.createOn = createOn;
         this.hasBlockingSession = hasBlockingSession;
         this.cashRegisters = cashRegisters;

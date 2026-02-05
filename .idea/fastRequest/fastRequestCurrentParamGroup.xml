@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="fastRequestCurrentParamGroup">
+    <option name="clasDescription" value="Lookup endpoints for external integrations." />
+    <option name="className" value="com.erp.cashier.controller.LookupController" />
+    <option name="filePath" value="" />
+    <option name="method" value="lookupCashier" />
+    <option name="methodDescription" value="Looks up a cashier by identifier." />
+    <option name="module" value="erp_cashier_backend" />
+    <option name="originUrl" value="/api/lookup/cashier" />
+    <option name="requestParamMap">
+      <map>
+        <entry key="id">
+          <value>
+            <Object />
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="returnDocument" value="null" />
+    <option name="url" value="/api/lookup/cashier" />
+  </component>
+</project>

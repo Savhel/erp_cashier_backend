@@ -16,6 +16,8 @@ public class LoginUserResponse {
     private String roleType;
     private String agencyId;
     private String organizationId;
+    private String bankingAccount;
+    private String accountingAccount;
 
     /**
      * Default constructor for JSON serialization.

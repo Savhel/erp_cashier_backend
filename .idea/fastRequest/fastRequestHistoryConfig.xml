@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="fastRequestHistoryConfig">
+    <option name="historyList">
+      <list>
+        <ResponseHistory>
+          <option name="className" value="com.erp.cashier.controller.AuthController" />
+          <option name="code" value="401" />
+          <option name="enableEnv" value="local" />
+          <option name="enableProject" value="erp_cashier_backend" />
+          <option name="method" value="login" />
+          <option name="methodType" value="POST" />
+          <option name="name" value="Authenticates a user and returns session data." />
+          <option name="paramGroup">
+            <ParamGroupCollection>
+              <option name="bodyKeyValueListJson" value="{&#10;  &quot;username&quot;: &quot;username_yj2sm&quot;,&#10;  &quot;password&quot;: &quot;password_9nn1c&quot;,&#10;  &quot;organizationId&quot;: &quot;organizationId_1j1wv&quot;,&#10;  &quot;agencyId&quot;: &quot;agencyId_ad10f&quot;&#10;}" />
+              <option name="className" value="com.erp.cashier.controller.AuthController" />
+              <option name="jsonDocument" value="{&#10;  &quot;username&quot;: &quot;No comment,Value =username_yj2sm&quot;,&#10;  &quot;password&quot;: &quot;No comment,Value =password_9nn1c&quot;,&#10;  &quot;organizationId&quot;: &quot;No comment,Value =organizationId_1j1wv&quot;,&#10;  &quot;agencyId&quot;: &quot;No comment,Value =agencyId_ad10f&quot;&#10;}" />
+              <option name="method" value="login" />
+              <option name="methodDescription" value="Authenticates a user and returns session data." />
+              <option name="methodType" value="POST" />
+              <option name="multipartKeyValueListJson" value="[]" />
+              <option name="originUrl" value="/api/auth/login" />
+              <option name="pathParamsKeyValueListJson" value="[]" />
+              <option name="returnDocument" value="null" />
+              <option name="url" value="/api/auth/login" />
+              <option name="urlEncodedKeyValueListJson" value="[]" />
+              <option name="urlParamsKeyValueListJson" value="[]" />
+            </ParamGroupCollection>
+          </option>
+          <option name="requestInfo" value="Request Url: http://localhost:8080/api/auth/login&#13;&#10;Request Headers: &#13;&#10;    Accept: application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8&#13;&#10;    User-Agent: Fast Request/2025.1.7.1&#13;&#10;    Accept-Encoding: gzip, deflate&#13;&#10;    Content-Length: 125&#13;&#10;    Content-Type: application/json;charset=UTF-8&#13;&#10;Request Body: &#13;&#10;    {&quot;organizationId&quot;:&quot;organizationId_1j1wv&quot;,&quot;password&quot;:&quot;password_9nn1c&quot;,&quot;agencyId&quot;:&quot;agencyId_ad10f&quot;,&quot;username&quot;:&quot;username_yj2sm&quot;}&#13;&#10;" />
+          <option name="response" value="{&quot;error&quot;:&quot;Invalid credentials&quot;}" />
+          <option name="url" value="/api/auth/login" />
+        </ResponseHistory>
+        <ResponseHistory>
+          <option name="className" value="com.erp.cashier.controller.AuthController" />
+          <option name="code" value="500" />
+          <option name="enableEnv" value="local" />
+          <option name="enableProject" value="erp_cashier_backend" />
+          <option name="method" value="session" />
+          <option name="methodType" value="GET" />
+          <option name="name" value="Returns the current authenticated session." />
+          <option name="paramGroup">
+            <ParamGroupCollection>
+              <option name="className" value="com.erp.cashier.controller.AuthController" />
+              <option name="method" value="session" />
+              <option name="methodDescription" value="Returns the current authenticated session." />
+              <option name="multipartKeyValueListJson" value="[]" />
+              <option name="originUrl" value="/api/auth/session" />
+              <option name="pathParamsKeyValueListJson" value="[]" />
+              <option name="returnDocument" value="null" />
+              <option name="url" value="/api/auth/session" />
+              <option name="urlEncodedKeyValueListJson" value="[]" />
+              <option name="urlParamsKeyValueListJson" value="[]" />
+            </ParamGroupCollection>
+          </option>
+          <option name="requestInfo" value="Request Url: http://localhost:8080/api/auth/session&#13;&#10;Request Headers: &#13;&#10;    Accept: application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8&#13;&#10;    User-Agent: Fast Request/2025.1.7.1&#13;&#10;    Accept-Encoding: gzip, deflate&#13;&#10;Request Body: &#13;&#10;    null&#13;&#10;" />
+          <option name="response" value="{&quot;error&quot;:&quot;Unexpected server error&quot;}" />
+          <option name="url" value="/api/auth/session" />
+        </ResponseHistory>
+      </list>
+    </option>
+  </component>
+</project>

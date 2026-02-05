@@ -14,6 +14,9 @@ import lombok.Data;
 public class AccountResponse {
     private String id;
     private String accountNumber;
+    private String bankAccountNumber;
+    private String accountingAccount;
+    private String accountLabel;
     private Double totalFunds;
     private Boolean isActive;
     private LocalDateTime createOn;
@@ -44,6 +47,9 @@ public class AccountResponse {
     public AccountResponse(
             String id,
             String accountNumber,
+            String bankAccountNumber,
+            String accountingAccount,
+            String accountLabel,
             Double totalFunds,
             Boolean isActive,
             LocalDateTime createOn,
@@ -54,6 +60,9 @@ public class AccountResponse {
     ) {
         this.id = id;
         this.accountNumber = accountNumber;
+        this.bankAccountNumber = bankAccountNumber;
+        this.accountingAccount = accountingAccount;
+        this.accountLabel = accountLabel;
         this.totalFunds = totalFunds;
         this.isActive = isActive;
         this.createOn = createOn;

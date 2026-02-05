@@ -7,7 +7,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -66,11 +65,15 @@ public class AuditLoggingWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
         Instant start = Instant.now();
-        AtomicReference<Throwable> errorRef = new AtomicReference<>();
-
         return chain.filter(exchange)
-                .doOnError(errorRef::set)
-                .doFinally(signalType -> logExchange(exchange, path, start, errorRef.get()));
+                .materialize()
+                .flatMap(signal -> logExchange(exchange, path, start, signal.getThrowable())
+                        .onErrorResume(ex -> {
+                            LOGGER.debug("Failed to record audit event for {}", path, ex);
+                            return Mono.empty();
+                        })
+                        .thenReturn(signal))
+                .dematerialize();
     }
 
     private boolean shouldSkip(String path) {
@@ -82,12 +85,12 @@ public class AuditLoggingWebFilter implements WebFilter {
         return false;
     }
 
-    private void logExchange(ServerWebExchange exchange, String path, Instant start, Throwable error) {
+    private Mono<Void> logExchange(ServerWebExchange exchange, String path, Instant start, Throwable error) {
         HttpMethod method = exchange.getRequest().getMethod();
         HttpStatus status = resolveStatus(exchange.getResponse().getStatusCode(), error);
         long durationMs = Duration.between(start, Instant.now()).toMillis();
 
-        exchange.getPrincipal()
+        return exchange.getPrincipal()
                 .ofType(Authentication.class)
                 .defaultIfEmpty(new UsernamePasswordAuthenticationToken(null, null))
                 .flatMap(authentication -> {
@@ -114,11 +117,7 @@ public class AuditLoggingWebFilter implements WebFilter {
                     String type = resolveType(path, method, status);
                     return auditService.recordEvent(type, authorId, auditPayload);
                 })
-                .onErrorResume(ex -> {
-                    LOGGER.debug("Failed to record audit event for {}", path, ex);
-                    return Mono.empty();
-                })
-                .subscribe();
+                .then();
     }
 
     private JwtPayload resolvePayload(Authentication authentication) {

@@ -3,7 +3,6 @@ package com.erp.cashier.dto;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import lombok.Data;
 
 /**
@@ -21,8 +20,8 @@ public class BillResponse {
     private LocalDateTime dueDate;
     private String cashRegisterId;
     private String paymentMode;
-    private List<Map<String, Object>> items;
-    private AccountResponse account;
+    private List<BillItemResponse> items;
+    private BillAccountResponse account;
 
     /**
      * Default constructor for JSON serialization.
@@ -38,8 +37,8 @@ public class BillResponse {
             LocalDateTime dueDate,
             String cashRegisterId,
             String paymentMode,
-            List<Map<String, Object>> items,
-            AccountResponse account
+            List<BillItemResponse> items,
+            BillAccountResponse account
     ) {
         this.id = id;
         this.invoiceCode = invoiceCode;

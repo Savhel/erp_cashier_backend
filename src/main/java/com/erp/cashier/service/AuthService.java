@@ -10,10 +10,12 @@ import com.erp.cashier.dto.external.RtAuthResponse;
 import com.erp.cashier.dto.external.RtUserResponse;
 import com.erp.cashier.model.AdminProfile;
 import com.erp.cashier.model.Agency;
+import com.erp.cashier.model.CashRegisterSession;
 import com.erp.cashier.model.Organization;
 import com.erp.cashier.model.Person;
 import com.erp.cashier.repository.AdminProfileRepository;
 import com.erp.cashier.repository.AgencyRepository;
+import com.erp.cashier.repository.CashRegisterSessionRepository;
 import com.erp.cashier.repository.CashierProfileRepository;
 import com.erp.cashier.repository.OrganizationRepository;
 import com.erp.cashier.repository.PersonRepository;
@@ -21,6 +23,7 @@ import com.erp.cashier.security.JwtPayload;
 import com.erp.cashier.security.JwtService;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -43,7 +46,9 @@ public class AuthService {
     private static final String ROLE_USER = "user";
     private static final String ROLE_ADMIN = "admin";
     private static final String ROLE_CASHIER = "cashier";
+    private static final String ROLE_TYPE_SALESPERSON = "salesperson";
     private static final String TOKEN_TYPE_BEARER = "Bearer";
+    private static final String SESSION_STATE_OPEN = "ouverte";
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthService.class);
 
     private final OrganizationRepository organizationRepository;
@@ -51,9 +56,11 @@ public class AuthService {
     private final PersonRepository personRepository;
     private final AdminProfileRepository adminProfileRepository;
     private final CashierProfileRepository cashierProfileRepository;
+    private final CashRegisterSessionRepository sessionRepository;
     private final JwtService jwtService;
     private final R2dbcEntityTemplate entityTemplate;
     private final RtComOpsClient rtComOpsClient;
+    private final AuditService auditService;
 
     /**
      * Creates the authentication service.
@@ -73,18 +80,22 @@ public class AuthService {
             PersonRepository personRepository,
             AdminProfileRepository adminProfileRepository,
             CashierProfileRepository cashierProfileRepository,
+            CashRegisterSessionRepository sessionRepository,
             JwtService jwtService,
             R2dbcEntityTemplate entityTemplate,
-            RtComOpsClient rtComOpsClient
+            RtComOpsClient rtComOpsClient,
+            AuditService auditService
     ) {
         this.organizationRepository = organizationRepository;
         this.agencyRepository = agencyRepository;
         this.personRepository = personRepository;
         this.adminProfileRepository = adminProfileRepository;
         this.cashierProfileRepository = cashierProfileRepository;
+        this.sessionRepository = sessionRepository;
         this.jwtService = jwtService;
         this.entityTemplate = entityTemplate;
         this.rtComOpsClient = rtComOpsClient;
+        this.auditService = auditService;
     }
 
     /**
@@ -146,6 +157,20 @@ public class AuthService {
                 ));
     }
 
+    /**
+     * Logs out the current user and records an audit event.
+     *
+     * @param payload decoded JWT payload
+     * @return logout response
+     */
+    public Mono<com.erp.cashier.dto.SuccessResponse> logout(JwtPayload payload) {
+        if (payload == null) {
+            return Mono.just(new com.erp.cashier.dto.SuccessResponse(true));
+        }
+        return recordAuthEvent("logout", payload)
+                .thenReturn(new com.erp.cashier.dto.SuccessResponse(true));
+    }
+
     private Mono<LoginResponse> buildLocalLoginResponse(Person person) {
         return resolveProfiles(person)
                 .flatMap(profile -> buildLoginResponse(person, profile));
@@ -160,13 +185,96 @@ public class AuthService {
                 profile.agencyId(),
                 profile.organizationId()
         );
-        String token = jwtService.generateAccessToken(loginUser);
-        long expiresIn = jwtService.getAccessTokenTtlSeconds();
-        LoginResponse response = new LoginResponse(true, loginUser, token, TOKEN_TYPE_BEARER, expiresIn);
-        return buildOrganizations(profile).map(organizations -> {
-            response.setOrganizations(attachOrganizationTokens(person, organizations, profile));
-            return response;
-        });
+        return attachSalesAgentAccounts(loginUser)
+                .flatMap(enrichedUser -> {
+                    String token = jwtService.generateAccessToken(enrichedUser);
+                    long expiresIn = jwtService.getAccessTokenTtlSeconds();
+                    LoginResponse response = new LoginResponse(
+                            true,
+                            enrichedUser,
+                            token,
+                            TOKEN_TYPE_BEARER,
+                            expiresIn
+                    );
+                    return buildOrganizations(profile).map(organizations -> {
+                        response.setOrganizations(attachOrganizationTokens(person, organizations, profile));
+                        return response;
+                    }).flatMap(resp -> recordAuthEvent("login", resp.getUser()).thenReturn(resp));
+                });
+    }
+
+    private Mono<Void> recordAuthEvent(String type, LoginUserResponse user) {
+        if (user == null) {
+            return Mono.empty();
+        }
+        return resolveAuthSessionId(user.getId(), user.getRole(), user.getRoleType())
+                .flatMap(sessionId -> auditService.recordAuthEvent(
+                        type,
+                        user.getId(),
+                        normalizeSessionId(sessionId),
+                        buildAuthPayload(user)
+                ))
+                .onErrorResume(ex -> Mono.empty());
+    }
+
+    private Mono<Void> recordAuthEvent(String type, JwtPayload payload) {
+        if (payload == null) {
+            return Mono.empty();
+        }
+        return resolveAuthSessionId(payload.getUserId(), payload.getRole(), payload.getRoleType())
+                .flatMap(sessionId -> auditService.recordAuthEvent(
+                        type,
+                        payload.getUserId(),
+                        normalizeSessionId(sessionId),
+                        buildAuthPayload(payload)
+                ))
+                .onErrorResume(ex -> Mono.empty());
+    }
+
+    private Mono<String> resolveAuthSessionId(String userId, String role, String roleType) {
+        if (!ROLE_CASHIER.equalsIgnoreCase(role)
+                || !ROLE_TYPE_SALESPERSON.equalsIgnoreCase(roleType)
+                || !StringUtils.hasText(userId)) {
+            return Mono.just("");
+        }
+        return sessionRepository.findLatestByOpenByAndState(userId, SESSION_STATE_OPEN)
+                .map(CashRegisterSession::getId)
+                .switchIfEmpty(Mono.just(""));
+    }
+
+    private String normalizeSessionId(String sessionId) {
+        return StringUtils.hasText(sessionId) ? sessionId : null;
+    }
+
+    private Map<String, Object> buildAuthPayload(LoginUserResponse user) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        putIfPresent(payload, "user_id", user.getId());
+        putIfPresent(payload, "username", user.getUsername());
+        putIfPresent(payload, "role", user.getRole());
+        putIfPresent(payload, "role_type", user.getRoleType());
+        putIfPresent(payload, "organization_id", user.getOrganizationId());
+        putIfPresent(payload, "agency_id", user.getAgencyId());
+        putIfPresent(payload, "banking_account", user.getBankingAccount());
+        putIfPresent(payload, "accounting_account", user.getAccountingAccount());
+        return payload;
+    }
+
+    private Map<String, Object> buildAuthPayload(JwtPayload payload) {
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        putIfPresent(data, "user_id", payload.getUserId());
+        putIfPresent(data, "username", payload.getUsername());
+        putIfPresent(data, "role", payload.getRole());
+        putIfPresent(data, "role_type", payload.getRoleType());
+        putIfPresent(data, "organization_id", payload.getOrganizationId());
+        putIfPresent(data, "agency_id", payload.getAgencyId());
+        return data;
+    }
+
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (payload == null || !StringUtils.hasText(key) || value == null) {
+            return;
+        }
+        payload.put(key, value);
     }
 
     private String resolveEmail(LoginRequest request) {
@@ -267,27 +375,72 @@ public class AuthService {
                                     "Invalid credentials"
                             ));
                         }
-                        return resolveCashierContext(person);
+                        return requireOpenCashierSession(person.getId())
+                                .then(resolveCashierContext(person));
                     }
                     return Mono.just(new UserProfileContext(ROLE_USER, null, null, null));
                 });
+    }
+
+    private Mono<Void> requireOpenCashierSession(String cashierId) {
+        if (!StringUtils.hasText(cashierId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
+        }
+        return sessionRepository.findLatestByOpenByAndState(cashierId, SESSION_STATE_OPEN)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "No open session found."
+                )))
+                .flatMap(session -> {
+                    if (Boolean.TRUE.equals(session.getIsLocked())) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.UNAUTHORIZED,
+                                "Session is locked."
+                        ));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<LoginUserResponse> attachSalesAgentAccounts(LoginUserResponse loginUser) {
+        if (loginUser == null) {
+            return Mono.empty();
+        }
+        if (!ROLE_CASHIER.equalsIgnoreCase(loginUser.getRole())
+                || !ROLE_TYPE_SALESPERSON.equalsIgnoreCase(loginUser.getRoleType())) {
+            return Mono.just(loginUser);
+        }
+        return sessionRepository.findLatestByOpenByAndState(loginUser.getId(), SESSION_STATE_OPEN)
+                .flatMap(session -> entityTemplate.getDatabaseClient()
+                        .sql("SELECT sale_agent_bank_account, sale_agent_accounting_account "
+                                + "FROM cash_register WHERE id = $1")
+                        .bind(0, session.getCashRegisterId())
+                        .map((row, meta) -> {
+                            loginUser.setBankingAccount(row.get("sale_agent_bank_account", String.class));
+                            loginUser.setAccountingAccount(row.get("sale_agent_accounting_account", String.class));
+                            return loginUser;
+                        })
+                        .one())
+                .defaultIfEmpty(loginUser)
+                .onErrorResume(ex -> Mono.just(loginUser));
     }
 
     private Mono<UserProfileContext> resolveAdminContext(AdminProfile admin) {
         String roleType = trimToNull(admin.getRoleType());
         String orgId = trimToNull(admin.getOrganizationId());
         String agencyId = trimToNull(admin.getAgencyId());
+        String normalizedRoleType = AdminRoleResolver.normalizeRoleType(roleType, agencyId);
         if (StringUtils.hasText(agencyId) && !StringUtils.hasText(orgId)) {
             return agencyRepository.findById(agencyId)
                     .map(agency -> new UserProfileContext(
                             ROLE_ADMIN,
-                            roleType,
+                            normalizedRoleType,
                             agency.getOrganizationId(),
                             agencyId
                     ))
-                    .defaultIfEmpty(new UserProfileContext(ROLE_ADMIN, roleType, null, agencyId));
+                    .defaultIfEmpty(new UserProfileContext(ROLE_ADMIN, normalizedRoleType, null, agencyId));
         }
-        return Mono.just(new UserProfileContext(ROLE_ADMIN, roleType, orgId, agencyId));
+        return Mono.just(new UserProfileContext(ROLE_ADMIN, normalizedRoleType, orgId, agencyId));
     }
 
     private Mono<UserProfileContext> resolveCashierContext(Person person) {
@@ -304,14 +457,14 @@ public class AuthService {
                 .bind(0, person.getId())
                 .map((row, meta) -> new UserProfileContext(
                         ROLE_CASHIER,
-                        null,
+                        ROLE_TYPE_SALESPERSON,
                         row.get("organization_id", String.class),
                         row.get("agency_id", String.class)
                 ))
                 .one()
                 .switchIfEmpty(resolveCashierBaseContext(person.getId()));
         return activeAssignment
-                .defaultIfEmpty(new UserProfileContext(ROLE_CASHIER, null, null, null));
+                .defaultIfEmpty(new UserProfileContext(ROLE_CASHIER, ROLE_TYPE_SALESPERSON, null, null));
     }
 
     private Mono<UserProfileContext> resolveCashierBaseContext(String personId) {
@@ -324,7 +477,7 @@ public class AuthService {
                 .bind(0, personId)
                 .map((row, meta) -> new UserProfileContext(
                         ROLE_CASHIER,
-                        null,
+                        ROLE_TYPE_SALESPERSON,
                         row.get("organization_id", String.class),
                         row.get("base_agency_id", String.class)
                 ))
@@ -408,7 +561,7 @@ public class AuthService {
             return new RoleInfo(profile.role(), profile.roleType());
         }
         return switch (roleName) {
-            case "ROLE_SALESPERSON", "ROLE_CASHIER" -> new RoleInfo(ROLE_CASHIER, null);
+            case "ROLE_SALESPERSON", "ROLE_CASHIER" -> new RoleInfo(ROLE_CASHIER, ROLE_TYPE_SALESPERSON);
             case "ROLE_MANAGER", "ROLE_AGENCY_ADMIN" -> new RoleInfo(ROLE_ADMIN, "agency_admin");
             case "ROLE_ORG_ADMIN", "ROLE_ADMIN" -> new RoleInfo(ROLE_ADMIN, "organization_admin");
             case "ROLE_SUPERADMIN" -> new RoleInfo(ROLE_ADMIN, "superadmin");

@@ -3,11 +3,16 @@ package com.erp.cashier.controller;
 import com.erp.cashier.dto.AccountOperationRequest;
 import com.erp.cashier.dto.AccountP2PTransferRequest;
 import com.erp.cashier.dto.AccountP2PTransferResponse;
-import com.erp.cashier.dto.AccountResponse;
 import com.erp.cashier.dto.AccountTransferResponse;
+import com.erp.cashier.dto.AdminAccountResponse;
+import com.erp.cashier.dto.AdminCustomerResponse;
+import com.erp.cashier.dto.CashierFundRequest;
+import com.erp.cashier.dto.CashierAccountResponse;
+import com.erp.cashier.dto.CashierCustomerResponse;
 import com.erp.cashier.dto.CreateCustomerRequest;
 import com.erp.cashier.dto.CreateCustomerResponse;
 import com.erp.cashier.dto.CustomerResponse;
+import com.erp.cashier.dto.FundRequestResponse;
 import com.erp.cashier.security.JwtPayload;
 import com.erp.cashier.service.AccountService;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -48,8 +53,11 @@ public class AccountController {
      */
     @GetMapping("/admin/accounts")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Flux<AccountResponse> listAdminAccounts() {
-        return accountService.listAccounts();
+    public Flux<AdminAccountResponse> listAdminAccounts(Authentication authentication) {
+        return accountService.listAdminAccounts(
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -59,8 +67,11 @@ public class AccountController {
      */
     @GetMapping("/admin/customers")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Flux<CustomerResponse> listAdminCustomers() {
-        return accountService.listCustomers();
+    public Flux<AdminCustomerResponse> listAdminCustomers(Authentication authentication) {
+        return accountService.listAdminCustomers(
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -76,7 +87,11 @@ public class AccountController {
             @RequestBody CreateCustomerRequest request,
             Authentication authentication
     ) {
-        return accountService.createCustomer(request, resolveUserId(authentication));
+        return accountService.createCustomer(
+                request,
+                resolveUserId(authentication),
+                resolveOrganizationId(authentication)
+        );
     }
 
     /**
@@ -86,8 +101,11 @@ public class AccountController {
      */
     @GetMapping("/cashier/accounts")
     @PreAuthorize("hasAuthority('ROLE_CASHIER')")
-    public Flux<AccountResponse> listCashierAccounts() {
-        return accountService.listAccounts();
+    public Flux<CashierAccountResponse> listCashierAccounts(Authentication authentication) {
+        return accountService.listAccounts(
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -97,8 +115,11 @@ public class AccountController {
      */
     @GetMapping("/cashier/customers")
     @PreAuthorize("hasAuthority('ROLE_CASHIER')")
-    public Flux<CustomerResponse> listCashierCustomers() {
-        return accountService.listCustomers();
+    public Flux<CashierCustomerResponse> listCashierCustomers(Authentication authentication) {
+        return accountService.listCustomers(
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -109,8 +130,15 @@ public class AccountController {
      */
     @GetMapping("/customers/search")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_CASHIER')")
-    public Flux<CustomerResponse> searchCustomers(@RequestParam(value = "q", required = false) String query) {
-        return accountService.searchCustomers(query);
+    public Flux<CustomerResponse> searchCustomers(
+            @RequestParam(value = "q", required = false) String query,
+            Authentication authentication
+    ) {
+        return accountService.searchCustomers(
+                query,
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -130,7 +158,9 @@ public class AccountController {
                 request != null ? request.getAccountId() : null,
                 request != null ? request.getAmount() : null,
                 request != null ? request.getReference() : null,
+                request != null ? request.getReason() : null,
                 request != null ? request.getTicketing() : null,
+                request != null ? request.getPaymentMethod() : null,
                 resolveUserId(authentication)
         );
     }
@@ -152,7 +182,9 @@ public class AccountController {
                 request != null ? request.getAccountId() : null,
                 request != null ? request.getAmount() : null,
                 request != null ? request.getReference() : null,
+                request != null ? request.getReason() : null,
                 request != null ? request.getTicketing() : null,
+                request != null ? request.getPaymentMethod() : null,
                 resolveUserId(authentication)
         );
     }
@@ -173,6 +205,37 @@ public class AccountController {
         return accountService.transferP2P(request, resolveUserId(authentication));
     }
 
+    /**
+     * Requests cash funds from the oldest available cashier in the same agency.
+     *
+     * @param request fund request payload
+     * @param authentication authentication payload
+     * @return transfer response
+     */
+    @PostMapping("/cashier/fund-requests")
+    @PreAuthorize("hasAuthority('ROLE_CASHIER')")
+    public Mono<AccountP2PTransferResponse> requestFunds(
+            @RequestBody CashierFundRequest request,
+            Authentication authentication
+    ) {
+        return accountService.requestFunds(request, resolveUserId(authentication));
+    }
+
+    /**
+     * Lists fund requests for the cashier agency.
+     *
+     * @param authentication authentication payload
+     * @return fund requests
+     */
+    @GetMapping("/cashier/fund-requests")
+    @PreAuthorize("hasAuthority('ROLE_CASHIER')")
+    public Flux<FundRequestResponse> listFundRequests(Authentication authentication) {
+        return accountService.listFundRequests(
+                resolveUserId(authentication),
+                resolveAgencyId(authentication)
+        );
+    }
+
     private String resolveUserId(Authentication authentication) {
         if (authentication == null) {
             return null;
@@ -180,6 +243,28 @@ public class AccountController {
         Object details = authentication.getDetails();
         if (details instanceof JwtPayload payload) {
             return payload.getUserId();
+        }
+        return null;
+    }
+
+    private String resolveOrganizationId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getOrganizationId();
+        }
+        return null;
+    }
+
+    private String resolveAgencyId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getAgencyId();
         }
         return null;
     }

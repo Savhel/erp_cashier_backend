@@ -45,6 +45,9 @@ public class Agency {
     @Column("organization_id")
     private String organizationId;
 
+    @Column("telegram_bot_token")
+    private String telegramBotToken;
+
     @Column("create_on")
     private LocalDateTime createOn;
 

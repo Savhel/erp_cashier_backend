@@ -17,6 +17,8 @@ public class MovementResponse {
     private String sense;
     private String reason;
     private String externalReference;
+    private Boolean isAccounted;
+    private String paymentMethod;
     private LocalDateTime createOn;
     private MovementPartyResponse recipient;
     private MovementPartyResponse emitter;
@@ -49,6 +51,8 @@ public class MovementResponse {
             String sense,
             String reason,
             String externalReference,
+            Boolean isAccounted,
+            String paymentMethod,
             LocalDateTime createOn,
             MovementPartyResponse recipient,
             MovementPartyResponse emitter,
@@ -60,6 +64,8 @@ public class MovementResponse {
         this.sense = sense;
         this.reason = reason;
         this.externalReference = externalReference;
+        this.isAccounted = isAccounted;
+        this.paymentMethod = paymentMethod;
         this.createOn = createOn;
         this.recipient = recipient;
         this.emitter = emitter;

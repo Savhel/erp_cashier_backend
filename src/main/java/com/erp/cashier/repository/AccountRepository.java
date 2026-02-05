@@ -20,4 +20,12 @@ public interface AccountRepository extends ReactiveCrudRepository<Account, Strin
      * @return matching account
      */
     Mono<Account> findByAccountNumber(String accountNumber);
+
+    /**
+     * Finds the first account by client identifier.
+     *
+     * @param clientId client identifier
+     * @return matching account
+     */
+    Mono<Account> findFirstByClientId(String clientId);
 }

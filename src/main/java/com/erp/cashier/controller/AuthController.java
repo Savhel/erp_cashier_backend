@@ -49,11 +49,13 @@ public class AuthController {
     /**
      * Logs out the current user.
      *
+     * @param authentication authentication payload
      * @return logout response
      */
     @PostMapping("/logout")
-    public Mono<SuccessResponse> logout() {
-        return Mono.just(new SuccessResponse(true));
+    public Mono<SuccessResponse> logout(Authentication authentication) {
+        JwtPayload payload = resolvePayload(authentication);
+        return authService.logout(payload);
     }
 
     /**

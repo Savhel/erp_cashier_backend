@@ -36,6 +36,9 @@ public class Account {
     @Column("create_by")
     private String createBy;
 
+    @Column("organization_id")
+    private String organizationId;
+
     @Column("previous_event_hash")
     private String previousEventHash;
 

@@ -10,6 +10,7 @@ import com.erp.cashier.repository.CashierAgencyAssignmentRepository;
 import com.erp.cashier.repository.CashierProfileRepository;
 import com.erp.cashier.repository.PersonRepository;
 import com.erp.cashier.security.JwtPayload;
+import com.erp.cashier.service.AdminRoleResolver;
 import com.erp.cashier.service.PasswordService;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -333,11 +334,16 @@ public class EmployeeController {
         return adminProfileRepository.findByPersonId(personId)
                 .flatMap(existing -> {
                     boolean updated = false;
-                    if (StringUtils.hasText(roleType)
+                    String resolvedAgencyId = StringUtils.hasText(agencyId) ? agencyId : existing.getAgencyId();
+                    String resolvedRoleType = AdminRoleResolver.normalizeRoleType(
+                            StringUtils.hasText(roleType) ? roleType : existing.getRoleType(),
+                            resolvedAgencyId
+                    );
+                    if (StringUtils.hasText(resolvedRoleType)
                             && (existing.getRoleType() == null
                             || !"superadmin".equalsIgnoreCase(existing.getRoleType()))
-                            && !roleType.equalsIgnoreCase(existing.getRoleType())) {
-                        existing.setRoleType(roleType);
+                            && !resolvedRoleType.equalsIgnoreCase(existing.getRoleType())) {
+                        existing.setRoleType(resolvedRoleType);
                         updated = true;
                     }
                     if (StringUtils.hasText(organizationId) && !organizationId.equals(existing.getOrganizationId())) {
@@ -354,7 +360,7 @@ public class EmployeeController {
                     AdminProfile profile = new AdminProfile();
                     profile.setId(UUID.randomUUID().toString());
                     profile.setPersonId(personId);
-                    profile.setRoleType(roleType);
+                    profile.setRoleType(AdminRoleResolver.normalizeRoleType(roleType, agencyId));
                     profile.setOrganizationId(organizationId);
                     profile.setAgencyId(agencyId);
                     return entityTemplate.insert(AdminProfile.class).using(profile).then();

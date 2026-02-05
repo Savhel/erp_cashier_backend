@@ -115,7 +115,7 @@ public class CashierAdminService {
         sql.append("AND assigned_by IS NOT NULL ");
         sql.append("ORDER BY cashier_id, assigned_on DESC");
         sql.append(") ");
-        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.account_number, p.country, ");
+        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.country, ");
         sql.append("cp.town_list_chosen, cp.work_town, cp.hire_date ");
         sql.append("FROM person p ");
         sql.append("JOIN cashier_profile cp ON cp.person_id = p.id ");
@@ -188,7 +188,7 @@ public class CashierAdminService {
         }
 
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.account_number, p.country, ");
+        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.country, ");
         sql.append("cp.town_list_chosen, cp.work_town, cp.hire_date ");
         sql.append("FROM person p ");
         sql.append("JOIN cashier_profile cp ON cp.person_id = p.id ");
@@ -259,7 +259,7 @@ public class CashierAdminService {
         sql.append("AND assigned_by IS NOT NULL ");
         sql.append("ORDER BY cashier_id, assigned_on DESC");
         sql.append(") ");
-        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.account_number, p.country, ");
+        sql.append("SELECT p.id, p.user_first_name, p.user_name, p.phone, p.country, ");
         sql.append("cp.town_list_chosen, cp.work_town, cp.hire_date, ");
         sql.append("cp.base_agency_id, ba.name AS base_agency_name, ba.town AS base_agency_town, ");
         sql.append("ba.organization_id AS base_organization_id ");
@@ -315,10 +315,6 @@ public class CashierAdminService {
         if (!StringUtils.hasText(workTown)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "work_town is required"));
         }
-        String accountNumber = trimToNull(request.getAccountNumber());
-        if (!StringUtils.hasText(accountNumber)) {
-            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Account number is required"));
-        }
         String townListChosen = trimToNull(request.getTownListChosen());
         if (!StringUtils.hasText(townListChosen)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "town_list_chosen is required"));
@@ -336,7 +332,6 @@ public class CashierAdminService {
         person.setUserName(userName);
         person.setUserFirstName(userFirstName);
         person.setPassword(passwordService.hashPassword(rawPassword));
-        person.setAccountNumber(accountNumber);
         person.setMail(trimToNull(request.getMail()));
         person.setCountry(trimToNull(request.getCountry()));
         person.setPhone(trimToNull(request.getPhone()));
@@ -425,7 +420,7 @@ public class CashierAdminService {
                                 "Cashier not found"
                         )))
                         .flatMap(profile -> resolveBaseAgency(profile)
-                                .defaultIfEmpty(null)
+                                .defaultIfEmpty(new Agency())
                                 .flatMap(baseAgency -> {
                                     if (restrictToOrganization) {
                                         if (!StringUtils.hasText(organizationScope)) {
@@ -434,7 +429,7 @@ public class CashierAdminService {
                                                     "Forbidden"
                                             ));
                                         }
-                                        if (baseAgency == null) {
+                                        if (!StringUtils.hasText(baseAgency.getOrganizationId())) {
                                             return Mono.error(new ResponseStatusException(
                                                     HttpStatus.FORBIDDEN,
                                                     "Forbidden"
@@ -467,7 +462,7 @@ public class CashierAdminService {
                 row.get("user_name", String.class),
                 row.get("user_first_name", String.class),
                 row.get("phone", String.class),
-                row.get("account_number", String.class),
+                null,
                 row.get("country", String.class),
                 profile
         );
@@ -496,7 +491,7 @@ public class CashierAdminService {
                 row.get("user_name", String.class),
                 row.get("user_first_name", String.class),
                 row.get("phone", String.class),
-                row.get("account_number", String.class),
+                null,
                 row.get("country", String.class),
                 profile
         );
@@ -513,7 +508,7 @@ public class CashierAdminService {
                 person.getUserName(),
                 person.getUserFirstName(),
                 person.getPhone(),
-                person.getAccountNumber(),
+                null,
                 person.getCountry(),
                 profileResponse
         );
@@ -646,10 +641,9 @@ public class CashierAdminService {
     private Mono<Agency> resolveBaseAgency(CashierProfile profile) {
         String baseAgencyId = trimToNull(profile.getBaseAgencyId());
         if (!StringUtils.hasText(baseAgencyId)) {
-            return Mono.justOrEmpty((Agency) null);
+            return Mono.empty();
         }
-        return agencyRepository.findById(baseAgencyId)
-                .defaultIfEmpty(null);
+        return agencyRepository.findById(baseAgencyId);
     }
 
     private CashierWithProfileResponse toWithProfileResponse(
@@ -681,7 +675,7 @@ public class CashierAdminService {
                 person.getUserName(),
                 person.getUserFirstName(),
                 person.getPhone(),
-                person.getAccountNumber(),
+                null,
                 person.getCountry(),
                 profileResponse
         );

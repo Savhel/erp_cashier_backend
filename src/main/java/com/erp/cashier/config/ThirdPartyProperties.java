@@ -17,7 +17,7 @@ public class ThirdPartyProperties {
     private boolean enabled = true;
     private String baseUrl = "http://localhost:8082";
     private String authPath = "/auth/login";
-    private String accountsPath = "/api/v1/thirdparty-accounts";
+    private String accountsPath = "/api/v1/thirdparty-accounts/by-agencies";
     private String email = "";
     private String password = "";
     private Sync sync = new Sync();

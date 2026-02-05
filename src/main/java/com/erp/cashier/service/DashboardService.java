@@ -2,6 +2,7 @@ package com.erp.cashier.service;
 
 import com.erp.cashier.dto.DashboardMetricPoint;
 import com.erp.cashier.dto.DashboardStatsResponse;
+import com.erp.cashier.repository.CashRegisterSessionRepository;
 import com.erp.cashier.security.JwtPayload;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -36,14 +37,19 @@ public class DashboardService {
             DateTimeFormatter.ofPattern("EEE dd MMM", Locale.FRENCH);
 
     private final R2dbcEntityTemplate entityTemplate;
+    private final CashRegisterSessionRepository sessionRepository;
 
     /**
      * Creates the dashboard service.
      *
      * @param entityTemplate entity template
      */
-    public DashboardService(R2dbcEntityTemplate entityTemplate) {
+    public DashboardService(
+            R2dbcEntityTemplate entityTemplate,
+            CashRegisterSessionRepository sessionRepository
+    ) {
         this.entityTemplate = entityTemplate;
+        this.sessionRepository = sessionRepository;
     }
 
     /**
@@ -66,13 +72,39 @@ public class DashboardService {
         LocalDateTime todayStart = today.atStartOfDay();
         LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
 
-        Mono<Long> activeSessions = countActiveSessions(orgId, agencyId);
-        Mono<BigDecimal> totalRevenue = sumRevenue(orgId, agencyId, null, null);
-        Mono<Long> todayMovements = countMovements(orgId, agencyId, todayStart, tomorrowStart);
-        Mono<BigDecimal> todayTotal = sumRevenue(orgId, agencyId, todayStart, tomorrowStart);
-        Mono<List<DashboardMetricPoint>> monthlyRevenue = listMonthlyRevenue(orgId, agencyId);
-        Mono<List<DashboardMetricPoint>> dailyRevenue = listDailyRevenue(orgId, agencyId);
-        Mono<List<DashboardMetricPoint>> hourlyRevenue = listHourlyRevenue(orgId, agencyId, todayStart, tomorrowStart);
+        if (isCashier) {
+            return resolveOpenSessionId(payload)
+                    .flatMap(sessionId -> {
+                        Mono<Long> activeSessions = countActiveSessions(orgId, agencyId, sessionId);
+                        Mono<BigDecimal> totalRevenue = sumRevenue(orgId, agencyId, sessionId, null, null);
+                        Mono<Long> todayMovements = countMovements(orgId, agencyId, sessionId, todayStart, tomorrowStart);
+                        Mono<BigDecimal> todayTotal = sumRevenue(orgId, agencyId, sessionId, todayStart, tomorrowStart);
+                        Mono<List<DashboardMetricPoint>> monthlyRevenue = listMonthlyRevenue(orgId, agencyId, sessionId);
+                        Mono<List<DashboardMetricPoint>> dailyRevenue = listDailyRevenue(orgId, agencyId, sessionId);
+                        Mono<List<DashboardMetricPoint>> hourlyRevenue =
+                                listHourlyRevenue(orgId, agencyId, sessionId, todayStart, tomorrowStart);
+                        return Mono.zip(activeSessions, totalRevenue, todayMovements, todayTotal,
+                                        monthlyRevenue, dailyRevenue, hourlyRevenue)
+                                .map(tuple -> new DashboardStatsResponse(
+                                        tuple.getT2(),
+                                        tuple.getT1(),
+                                        tuple.getT3(),
+                                        tuple.getT4(),
+                                        "cashier",
+                                        tuple.getT5(),
+                                        tuple.getT6(),
+                                        tuple.getT7()
+                                ));
+                    });
+        }
+
+        Mono<Long> activeSessions = countActiveSessions(orgId, agencyId, null);
+        Mono<BigDecimal> totalRevenue = sumRevenue(orgId, agencyId, null, null, null);
+        Mono<Long> todayMovements = countMovements(orgId, agencyId, null, todayStart, tomorrowStart);
+        Mono<BigDecimal> todayTotal = sumRevenue(orgId, agencyId, null, todayStart, tomorrowStart);
+        Mono<List<DashboardMetricPoint>> monthlyRevenue = listMonthlyRevenue(orgId, agencyId, null);
+        Mono<List<DashboardMetricPoint>> dailyRevenue = listDailyRevenue(orgId, agencyId, null);
+        Mono<List<DashboardMetricPoint>> hourlyRevenue = listHourlyRevenue(orgId, agencyId, null, todayStart, tomorrowStart);
 
         return Mono.zip(activeSessions, totalRevenue, todayMovements, todayTotal,
                         monthlyRevenue, dailyRevenue, hourlyRevenue)
@@ -81,19 +113,22 @@ public class DashboardService {
                         tuple.getT1(),
                         tuple.getT3(),
                         tuple.getT4(),
-                        isCashier ? "cashier" : "admin",
+                        "admin",
                         tuple.getT5(),
                         tuple.getT6(),
                         tuple.getT7()
                 ));
     }
 
-    private Mono<Long> countActiveSessions(String organizationId, String agencyId) {
+    private Mono<Long> countActiveSessions(String organizationId, String agencyId, String sessionId) {
         String sql = "SELECT COUNT(*) AS total "
                 + "FROM cash_register_session s "
                 + "JOIN cash_register r ON r.id = s.cash_register_id "
                 + "JOIN agency a ON a.id = r.agency_id "
                 + "WHERE s.state = :state AND a.organization_id = :orgId";
+        if (StringUtils.hasText(sessionId)) {
+            sql += " AND s.id = :sessionId";
+        }
         if (StringUtils.hasText(agencyId)) {
             sql += " AND a.id = :agencyId";
         }
@@ -101,6 +136,9 @@ public class DashboardService {
         DatabaseClient.GenericExecuteSpec spec = client.sql(sql)
                 .bind("state", STATE_OPEN)
                 .bind("orgId", organizationId);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -112,6 +150,7 @@ public class DashboardService {
     private Mono<Long> countMovements(
             String organizationId,
             String agencyId,
+            String sessionId,
             LocalDateTime start,
             LocalDateTime end
     ) {
@@ -122,6 +161,9 @@ public class DashboardService {
                 + "JOIN agency a ON a.id = r.agency_id "
                 + "WHERE a.organization_id = :orgId AND m.is_deleted = false "
                 + "AND m.create_on >= :start AND m.create_on < :end";
+        if (StringUtils.hasText(sessionId)) {
+            sql += " AND s.id = :sessionId";
+        }
         if (StringUtils.hasText(agencyId)) {
             sql += " AND a.id = :agencyId";
         }
@@ -130,6 +172,9 @@ public class DashboardService {
                 .bind("orgId", organizationId)
                 .bind("start", start)
                 .bind("end", end);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -141,6 +186,7 @@ public class DashboardService {
     private Mono<BigDecimal> sumRevenue(
             String organizationId,
             String agencyId,
+            String sessionId,
             LocalDateTime start,
             LocalDateTime end
     ) {
@@ -154,6 +200,9 @@ public class DashboardService {
         sql.append("JOIN cash_register r ON r.id = s.cash_register_id ");
         sql.append("JOIN agency a ON a.id = r.agency_id ");
         sql.append("WHERE a.organization_id = :orgId AND m.is_deleted = false ");
+        if (StringUtils.hasText(sessionId)) {
+            sql.append("AND s.id = :sessionId ");
+        }
         if (StringUtils.hasText(agencyId)) {
             sql.append("AND a.id = :agencyId ");
         }
@@ -163,6 +212,9 @@ public class DashboardService {
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
                 .sql(sql.toString())
                 .bind("orgId", organizationId);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -174,8 +226,15 @@ public class DashboardService {
                 .defaultIfEmpty(BigDecimal.ZERO);
     }
 
-    private Mono<List<DashboardMetricPoint>> listMonthlyRevenue(String organizationId, String agencyId) {
+    private Mono<List<DashboardMetricPoint>> listMonthlyRevenue(
+            String organizationId,
+            String agencyId,
+            String sessionId
+    ) {
         String scopedWhere = "WHERE a.organization_id = :orgId";
+        if (StringUtils.hasText(sessionId)) {
+            scopedWhere = scopedWhere + " AND s.id = :sessionId";
+        }
         if (StringUtils.hasText(agencyId)) {
             scopedWhere = scopedWhere + " AND a.id = :agencyId";
         }
@@ -194,6 +253,9 @@ public class DashboardService {
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
                 .sql(sql)
                 .bind("orgId", organizationId);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -223,12 +285,19 @@ public class DashboardService {
                 });
     }
 
-    private Mono<List<DashboardMetricPoint>> listDailyRevenue(String organizationId, String agencyId) {
+    private Mono<List<DashboardMetricPoint>> listDailyRevenue(
+            String organizationId,
+            String agencyId,
+            String sessionId
+    ) {
         LocalDate today = LocalDate.now();
         LocalDate startDate = today.minusDays(6);
         LocalDateTime start = startDate.atStartOfDay();
         LocalDateTime end = today.plusDays(1).atStartOfDay();
         String scopedWhere = "WHERE a.organization_id = :orgId";
+        if (StringUtils.hasText(sessionId)) {
+            scopedWhere = scopedWhere + " AND s.id = :sessionId";
+        }
         if (StringUtils.hasText(agencyId)) {
             scopedWhere = scopedWhere + " AND a.id = :agencyId";
         }
@@ -249,6 +318,9 @@ public class DashboardService {
                 .bind("orgId", organizationId)
                 .bind("start", start)
                 .bind("end", end);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -280,14 +352,18 @@ public class DashboardService {
     private Mono<List<DashboardMetricPoint>> listHourlyRevenue(
             String organizationId,
             String agencyId,
+            String sessionId,
             LocalDateTime start,
             LocalDateTime end
     ) {
         String scopedWhere = "WHERE a.organization_id = :orgId";
+        if (StringUtils.hasText(sessionId)) {
+            scopedWhere = scopedWhere + " AND s.id = :sessionId";
+        }
         if (StringUtils.hasText(agencyId)) {
             scopedWhere = scopedWhere + " AND a.id = :agencyId";
         }
-        String sql = "SELECT EXTRACT(HOUR FROM m.create_on) AS hour, "
+        String sql = "SELECT CAST(EXTRACT(HOUR FROM m.create_on) AS INTEGER) AS hour, "
                 + "COALESCE(SUM(CASE "
                 + "WHEN m.sense IN ('entree', 'in') THEN m.amount "
                 + "WHEN m.sense IN ('sortie', 'out') THEN -m.amount "
@@ -304,6 +380,9 @@ public class DashboardService {
                 .bind("orgId", organizationId)
                 .bind("start", start)
                 .bind("end", end);
+        if (StringUtils.hasText(sessionId)) {
+            spec = spec.bind("sessionId", sessionId);
+        }
         if (StringUtils.hasText(agencyId)) {
             spec = spec.bind("agencyId", agencyId);
         }
@@ -335,6 +414,25 @@ public class DashboardService {
             return BigDecimal.ZERO;
         }
         return value.divide(HUNDRED_THOUSAND, 2, RoundingMode.HALF_UP);
+    }
+
+    private Mono<String> resolveOpenSessionId(JwtPayload payload) {
+        return sessionRepository.findLatestByOpenByAndState(payload.getUserId(), STATE_OPEN)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.FORBIDDEN, "Open session required."
+                )))
+                .flatMap(session -> {
+                    if (Boolean.TRUE.equals(session.getIsLocked())) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.FORBIDDEN, "Session is locked."
+                        ));
+                    }
+                    return StringUtils.hasText(session.getId())
+                            ? Mono.just(session.getId())
+                            : Mono.error(new ResponseStatusException(
+                            HttpStatus.FORBIDDEN, "Open session required."
+                    ));
+                });
     }
 
     private boolean isCashier(String role) {

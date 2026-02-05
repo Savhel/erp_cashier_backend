@@ -29,11 +29,4 @@ public interface PersonRepository extends ReactiveCrudRepository<Person, String>
      */
     Mono<Person> findByMail(String mail);
 
-    /**
-     * Finds a person by account number.
-     *
-     * @param accountNumber account number
-     * @return matching person
-     */
-    Mono<Person> findByAccountNumber(String accountNumber);
 }

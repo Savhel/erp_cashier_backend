@@ -14,6 +14,7 @@ public class MovementPartyResponse {
     private String name;
     private String username;
     private String role;
+    private MovementPersonResponse person;
 
     /**
      * Default constructor for JSON serialization.
@@ -34,5 +35,28 @@ public class MovementPartyResponse {
         this.name = name;
         this.username = username;
         this.role = role;
+    }
+
+    /**
+     * Creates a movement party response with person payload.
+     *
+     * @param id party identifier
+     * @param name party name
+     * @param username party username
+     * @param role party role
+     * @param person person payload
+     */
+    public MovementPartyResponse(
+            String id,
+            String name,
+            String username,
+            String role,
+            MovementPersonResponse person
+    ) {
+        this.id = id;
+        this.name = name;
+        this.username = username;
+        this.role = role;
+        this.person = person;
     }
 }

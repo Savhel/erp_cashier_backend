@@ -1,8 +1,11 @@
 package com.erp.cashier.service;
 
-import com.erp.cashier.dto.AccountEventResponse;
-import com.erp.cashier.dto.AccountOwnerResponse;
-import com.erp.cashier.dto.AccountResponse;
+import com.erp.cashier.config.BillingProperties;
+import com.erp.cashier.dto.BillAccountResponse;
+import com.erp.cashier.dto.BillDetailResponse;
+import com.erp.cashier.dto.BillItemResponse;
+import com.erp.cashier.dto.BillListAccountResponse;
+import com.erp.cashier.dto.BillListResponse;
 import com.erp.cashier.dto.BillPageResponse;
 import com.erp.cashier.dto.BillPaymentRequest;
 import com.erp.cashier.dto.BillPaymentResponse;
@@ -13,9 +16,11 @@ import com.erp.cashier.model.CashRegisterSession;
 import com.erp.cashier.repository.AccountRepository;
 import com.erp.cashier.repository.CashRegisterMovementRepository;
 import com.erp.cashier.repository.CashRegisterSessionRepository;
+import com.erp.cashier.repository.CustomerProfileRepository;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,6 +35,7 @@ import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -48,7 +54,12 @@ public class BillService {
     private final CashRegisterMovementRepository movementRepository;
     private final CashRegisterSessionRepository sessionRepository;
     private final AccountRepository accountRepository;
+    private final CustomerProfileRepository customerProfileRepository;
     private final TransactionalOperator transactionalOperator;
+    private final AccountingCashMovementService accountingService;
+    private final AuditService auditService;
+    private final BillingProperties billingProperties;
+    private final WebClient billingClient;
 
     /**
      * Creates the bill service.
@@ -64,59 +75,75 @@ public class BillService {
             CashRegisterMovementRepository movementRepository,
             CashRegisterSessionRepository sessionRepository,
             AccountRepository accountRepository,
-            ReactiveTransactionManager transactionManager
+            CustomerProfileRepository customerProfileRepository,
+            ReactiveTransactionManager transactionManager,
+            AccountingCashMovementService accountingService,
+            AuditService auditService,
+            BillingProperties billingProperties,
+            WebClient.Builder webClientBuilder
     ) {
         this.entityTemplate = entityTemplate;
         this.movementRepository = movementRepository;
         this.sessionRepository = sessionRepository;
         this.accountRepository = accountRepository;
+        this.customerProfileRepository = customerProfileRepository;
         this.transactionalOperator = TransactionalOperator.create(transactionManager);
+        this.accountingService = accountingService;
+        this.auditService = auditService;
+        this.billingProperties = billingProperties;
+        String baseUrl = billingProperties != null ? billingProperties.getBaseUrl() : null;
+        this.billingClient = StringUtils.hasText(baseUrl)
+                ? webClientBuilder.baseUrl(baseUrl).build()
+                : webClientBuilder.build();
     }
 
     /**
      * Lists bills for a cashier.
      *
-     * @param cashierId cashier identifier
+     * @param organizationId organization identifier
      * @return bills
      */
-    public Flux<BillResponse> listCashierBills(String cashierId) {
-        if (!StringUtils.hasText(cashierId)) {
-            return Flux.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Cashier scope is required."));
+    public Flux<BillListResponse> listCashierBills(String organizationId) {
+        if (!StringUtils.hasText(organizationId)) {
+            return Flux.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Organization scope is required."));
         }
-        String sql = baseBillSelect() + "WHERE m.reason = :reason AND s.open_by = :cashierId "
-                + "ORDER BY m.create_on DESC";
-        DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
-                .sql(sql)
-                .bind("reason", BILL_REASON)
-                .bind("cashierId", cashierId);
-        return spec.map(this::mapBillRow)
-                .all();
+        if (!isBillingExternalEnabled()) {
+            return listCashierBillsLocal(organizationId)
+                    .map(this::toBillListResponse);
+        }
+        return fetchExternalBills(organizationId)
+                .flatMapMany(Flux::fromIterable)
+                .map(this::toBillListResponse)
+                .onErrorResume(ex -> listCashierBillsLocal(organizationId).map(this::toBillListResponse));
     }
 
     /**
      * Fetches a bill by id for a cashier.
      *
      * @param billId bill identifier
-     * @param cashierId cashier identifier
+     * @param organizationId organization identifier
      * @return bill
      */
-    public Mono<BillResponse> getCashierBill(String billId, String cashierId) {
+    public Mono<BillDetailResponse> getCashierBill(String billId, String organizationId) {
         String resolvedBillId = trimToNull(billId);
         if (!StringUtils.hasText(resolvedBillId)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill id is required"));
         }
-        if (!StringUtils.hasText(cashierId)) {
-            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Cashier scope is required."));
+        if (!StringUtils.hasText(organizationId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Organization scope is required."));
         }
-        String sql = baseBillSelect() + "WHERE m.id = :billId AND m.reason = :reason AND s.open_by = :cashierId";
-        return entityTemplate.getDatabaseClient()
-                .sql(sql)
-                .bind("billId", resolvedBillId)
-                .bind("reason", BILL_REASON)
-                .bind("cashierId", cashierId)
-                .map(this::mapBillRow)
-                .one()
-                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Bill not found.")));
+        if (!isBillingExternalEnabled()) {
+            return getCashierBillLocal(resolvedBillId, organizationId)
+                    .map(this::toBillDetailResponse);
+        }
+        return fetchExternalBills(organizationId)
+                .flatMapMany(Flux::fromIterable)
+                .filter(bill -> resolvedBillId.equals(trimToNull(bill.getId())))
+                .next()
+                .switchIfEmpty(getCashierBillLocal(resolvedBillId, organizationId))
+                .map(this::toBillDetailResponse)
+                .onErrorResume(ex -> getCashierBillLocal(resolvedBillId, organizationId)
+                        .map(this::toBillDetailResponse));
     }
 
     /**
@@ -134,16 +161,17 @@ public class BillService {
         String trimmedSearch = trimToNull(search);
 
         StringBuilder sql = new StringBuilder(baseBillSelect());
-        sql.append("WHERE m.reason = :reason ");
+        sql.append("WHERE b.is_deleted = FALSE ");
         Map<String, Object> binds = new HashMap<>();
-        binds.put("reason", BILL_REASON);
         if (StringUtils.hasText(trimmedSearch)) {
-            sql.append("AND (LOWER(m.external_reference) LIKE :search ");
+            sql.append("AND (LOWER(b.invoice_code) LIKE :search ");
+            sql.append("OR LOWER(b.customer_name) LIKE :search ");
             sql.append("OR LOWER(p.user_first_name) LIKE :search ");
-            sql.append("OR LOWER(p.user_name) LIKE :search) ");
+            sql.append("OR LOWER(p.user_name) LIKE :search ");
+            sql.append("OR LOWER(acc.account_number) LIKE :search) ");
             binds.put("search", "%" + trimmedSearch.toLowerCase() + "%");
         }
-        sql.append("ORDER BY m.create_on DESC LIMIT :limit OFFSET :offset");
+        sql.append("ORDER BY b.due_date DESC NULLS LAST, b.create_on DESC LIMIT :limit OFFSET :offset");
         binds.put("limit", resolvedLimit);
         binds.put("offset", offset);
 
@@ -188,20 +216,28 @@ public class BillService {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported payment mode."));
         }
 
-        return requireOpenSession(actorId)
-                .flatMap(session -> {
+        return Mono.zip(requireOpenSession(actorId), requireSalesAgentAccount(actorId))
+                .flatMap(tuple -> {
+                    CashRegisterSession session = tuple.getT1();
+                    Account cashierAccount = tuple.getT2();
                     boolean hasTicketing = request.getTicketing() != null && !request.getTicketing().isEmpty();
                     CashRegisterMovement movement = buildBillMovement(
                             session.getId(),
                             amount,
-                            actorId,
                             invoiceCode,
                             "entree",
                             null,
-                            null,
-                            hasTicketing
+                            cashierAccount.getId(),
+                            hasTicketing,
+                            actorId
                     );
                     return movementRepository.save(movement)
+                            .doOnSuccess(savedMovement -> accountingService.syncMovementAsync(
+                                    savedMovement,
+                                    cashierAccount.getAccountingAccount(),
+                                    null
+                            ))
+                            .doOnSuccess(savedMovement -> auditService.recordMovementEventAsync(savedMovement))
                             .map(savedMovement -> {
                                 BillPaymentResponse response = new BillPaymentResponse();
                                 response.setSuccess(true);
@@ -223,10 +259,11 @@ public class BillService {
         if (!StringUtils.hasText(accountId)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "account_id is required"));
         }
-        return Mono.zip(loadAccount(accountId), requireOpenSession(actorId))
+        return Mono.zip(loadAccount(accountId), requireOpenSession(actorId), requireSalesAgentAccount(actorId))
                 .flatMap(tuple -> {
                     Account account = tuple.getT1();
                     CashRegisterSession session = tuple.getT2();
+                    Account cashierAccount = tuple.getT3();
                     BigDecimal currentBalance = toBigDecimal(account.getTotalFunds());
                     if (currentBalance.compareTo(amount) < 0) {
                         return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient funds"));
@@ -234,30 +271,51 @@ public class BillService {
                     BigDecimal newBalance = currentBalance.subtract(amount);
                     account.setTotalFunds(newBalance.doubleValue());
                     boolean hasTicketing = request.getTicketing() != null && !request.getTicketing().isEmpty();
+                    String emitterAccountId = account.getId();
+                    String recipientAccountId = cashierAccount.getId();
                     CashRegisterMovement outMovement = buildBillMovement(
                             session.getId(),
                             amount,
-                            actorId,
                             invoiceCode,
                             "sortie",
-                            accountId,
-                            null,
-                            hasTicketing
+                            emitterAccountId,
+                            recipientAccountId,
+                            hasTicketing,
+                            actorId
                     );
                     CashRegisterMovement inMovement = buildBillMovement(
                             session.getId(),
                             amount,
-                            actorId,
                             invoiceCode,
                             "entree",
-                            null,
-                            accountId,
-                            hasTicketing
+                            emitterAccountId,
+                            recipientAccountId,
+                            hasTicketing,
+                            actorId
                     );
 
-                    Mono<BillPaymentResponse> flow = accountRepository.save(account)
+                    Mono<reactor.util.function.Tuple2<CashRegisterMovement, CashRegisterMovement>> flow =
+                            accountRepository.save(account)
                             .then(movementRepository.save(outMovement))
-                            .zipWith(movementRepository.save(inMovement))
+                            .zipWith(movementRepository.save(inMovement));
+
+                    return transactionalOperator.transactional(flow)
+                            .doOnSuccess(tupleSave -> {
+                                String emitterAccounting = account.getAccountingAccount();
+                                String recipientAccounting = cashierAccount.getAccountingAccount();
+                                accountingService.syncMovementAsync(
+                                        tupleSave.getT1(),
+                                        recipientAccounting,
+                                        emitterAccounting
+                                );
+                                accountingService.syncMovementAsync(
+                                        tupleSave.getT2(),
+                                        recipientAccounting,
+                                        emitterAccounting
+                                );
+                                auditService.recordMovementEventAsync(tupleSave.getT1());
+                                auditService.recordMovementEventAsync(tupleSave.getT2());
+                            })
                             .map(tupleSave -> {
                                 BillPaymentResponse response = new BillPaymentResponse();
                                 response.setSuccess(true);
@@ -266,21 +324,17 @@ public class BillService {
                                 response.setReference(invoiceCode);
                                 return response;
                             });
-
-                    return transactionalOperator.transactional(flow);
                 });
     }
 
     private String baseBillSelect() {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT m.id, m.external_reference, m.amount, m.create_on, ");
-        sql.append("s.cash_register_id, m.recipient_id, m.emitter_id, ");
+        sql.append("SELECT b.id, b.invoice_code, b.amount, b.customer_name, ");
+        sql.append("b.due_date, b.payment_mode, b.create_on, ");
         sql.append("acc.id AS account_id, acc.account_number, acc.total_funds, acc.is_active, ");
-        sql.append("acc.create_on AS account_create_on, acc.client_id, ");
-        sql.append("p.id AS person_id, p.user_first_name, p.user_name ");
-        sql.append("FROM cash_register_movement m ");
-        sql.append("JOIN cash_register_session s ON s.id = m.session_id ");
-        sql.append("LEFT JOIN account acc ON acc.id = COALESCE(m.recipient_id, m.emitter_id) ");
+        sql.append("p.user_first_name, p.user_name, p.phone ");
+        sql.append("FROM bill b ");
+        sql.append("LEFT JOIN account acc ON acc.id = b.account_id ");
         sql.append("LEFT JOIN customer_profile cp ON cp.id = acc.client_id ");
         sql.append("LEFT JOIN person p ON p.id = cp.person_id ");
         return sql.toString();
@@ -288,37 +342,31 @@ public class BillService {
 
     private BillResponse mapBillRow(Row row, RowMetadata metadata) {
         String accountId = row.get("account_id", String.class);
-        AccountResponse account = null;
+        String personName = trimToNull(row.get("user_first_name", String.class));
+        if (!StringUtils.hasText(personName)) {
+            personName = trimToNull(row.get("user_name", String.class));
+        }
+        String billCustomerName = trimToNull(row.get("customer_name", String.class));
+        String customerName = StringUtils.hasText(personName) ? personName : billCustomerName;
+        BillAccountResponse account = null;
         if (StringUtils.hasText(accountId)) {
-            AccountOwnerResponse owner = new AccountOwnerResponse(
-                    row.get("user_first_name", String.class),
-                    row.get("user_name", String.class),
-                    "customer"
-            );
-            account = new AccountResponse(
+            account = new BillAccountResponse(
                     accountId,
                     row.get("account_number", String.class),
                     row.get("total_funds", Double.class),
                     row.get("is_active", Boolean.class),
-                    row.get("account_create_on", LocalDateTime.class),
-                    row.get("client_id", String.class),
-                    owner,
-                    Collections.<AccountEventResponse>emptyList(),
-                    Collections.emptyList()
+                    StringUtils.hasText(personName) ? personName : billCustomerName,
+                    row.get("phone", String.class)
             );
-        }
-        String customerName = row.get("user_first_name", String.class);
-        if (!StringUtils.hasText(customerName)) {
-            customerName = row.get("user_name", String.class);
         }
         return new BillResponse(
                 row.get("id", String.class),
-                row.get("external_reference", String.class),
+                row.get("invoice_code", String.class),
                 row.get("amount", BigDecimal.class),
                 customerName,
-                row.get("create_on", LocalDateTime.class),
-                row.get("cash_register_id", String.class),
-                StringUtils.hasText(accountId) ? "account" : "cash",
+                row.get("due_date", LocalDateTime.class),
+                null,
+                row.get("payment_mode", String.class),
                 Collections.emptyList(),
                 account
         );
@@ -327,17 +375,18 @@ public class BillService {
     private Mono<Long> countBills(String search) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT COUNT(*) AS total ");
-        sql.append("FROM cash_register_movement m ");
-        sql.append("LEFT JOIN account acc ON acc.id = COALESCE(m.recipient_id, m.emitter_id) ");
+        sql.append("FROM bill b ");
+        sql.append("LEFT JOIN account acc ON acc.id = b.account_id ");
         sql.append("LEFT JOIN customer_profile cp ON cp.id = acc.client_id ");
         sql.append("LEFT JOIN person p ON p.id = cp.person_id ");
-        sql.append("WHERE m.reason = :reason ");
+        sql.append("WHERE b.is_deleted = FALSE ");
         Map<String, Object> binds = new HashMap<>();
-        binds.put("reason", BILL_REASON);
         if (StringUtils.hasText(search)) {
-            sql.append("AND (LOWER(m.external_reference) LIKE :search ");
+            sql.append("AND (LOWER(b.invoice_code) LIKE :search ");
+            sql.append("OR LOWER(b.customer_name) LIKE :search ");
             sql.append("OR LOWER(p.user_first_name) LIKE :search ");
-            sql.append("OR LOWER(p.user_name) LIKE :search) ");
+            sql.append("OR LOWER(p.user_name) LIKE :search ");
+            sql.append("OR LOWER(acc.account_number) LIKE :search) ");
             binds.put("search", "%" + search.toLowerCase() + "%");
         }
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
@@ -351,12 +400,12 @@ public class BillService {
     private CashRegisterMovement buildBillMovement(
             String sessionId,
             BigDecimal amount,
-            String actorId,
             String invoiceCode,
             String sense,
             String emitterId,
             String recipientId,
-            boolean hasTicketing
+            boolean hasTicketing,
+            String actorId
     ) {
         CashRegisterMovement movement = new CashRegisterMovement();
         movement.setId(UUID.randomUUID().toString());
@@ -364,15 +413,33 @@ public class BillService {
         movement.setSense(sense);
         movement.setAmount(amount);
         movement.setReason(BILL_REASON);
-        movement.setEmitterId(emitterId);
-        movement.setRecipientId(recipientId);
+        movement.setEmitterId(trimToNull(emitterId));
+        movement.setRecipientId(trimToNull(recipientId));
         movement.setIsAccounted(Boolean.FALSE);
         movement.setEventTicketingDetails(hasTicketing);
         movement.setExternalReference(invoiceCode);
         movement.setCreateOn(LocalDateTime.now());
         movement.setCreateBy(trimToNull(actorId));
         movement.setIsDeleted(Boolean.FALSE);
+        movement.markNew();
         return movement;
+    }
+
+    private Mono<Account> requireSalesAgentAccount(String actorId) {
+        String resolved = trimToNull(actorId);
+        if (!StringUtils.hasText(resolved)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Actor scope is required."));
+        }
+        return customerProfileRepository.findByPersonIdAndProfession(resolved, "SALES_AGENT")
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Cashier profile not found."
+                )))
+                .flatMap(profile -> accountRepository.findFirstByClientId(profile.getId()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Cashier account not found."
+                )));
     }
 
     private Mono<Account> loadAccount(String accountId) {
@@ -423,5 +490,114 @@ public class BillService {
             return null;
         }
         return value.trim();
+    }
+
+    private Mono<BillResponse> attachBillItems(BillResponse bill) {
+        if (bill == null || !StringUtils.hasText(bill.getId())) {
+            return Mono.just(bill);
+        }
+        return fetchBillItems(bill.getId())
+                .collectList()
+                .map(items -> {
+                    bill.setItems(items);
+                    return bill;
+                });
+    }
+
+    private Flux<BillItemResponse> fetchBillItems(String billId) {
+        String resolvedBillId = trimToNull(billId);
+        if (!StringUtils.hasText(resolvedBillId)) {
+            return Flux.empty();
+        }
+        return entityTemplate.getDatabaseClient()
+                .sql("SELECT description, quantity, amount FROM bill_item WHERE bill_id = :billId ORDER BY id")
+                .bind("billId", resolvedBillId)
+                .map((row, meta) -> new BillItemResponse(
+                        row.get("description", String.class),
+                        row.get("quantity", Integer.class),
+                        row.get("amount", BigDecimal.class)
+                ))
+                .all();
+    }
+
+    private Flux<BillResponse> listCashierBillsLocal(String organizationId) {
+        String sql = baseBillSelect() + "WHERE b.organization_id = :organizationId AND b.is_deleted = FALSE "
+                + "ORDER BY b.due_date DESC NULLS LAST, b.create_on DESC";
+        DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("organizationId", organizationId);
+        return spec.map(this::mapBillRow)
+                .all();
+    }
+
+    private Mono<BillResponse> getCashierBillLocal(String billId, String organizationId) {
+        String sql = baseBillSelect() + "WHERE b.id = :billId AND b.organization_id = :organizationId "
+                + "AND b.is_deleted = FALSE";
+        return entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("billId", billId)
+                .bind("organizationId", organizationId)
+                .map(this::mapBillRow)
+                .one()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Bill not found.")))
+                .flatMap(this::attachBillItems);
+    }
+
+    private BillListResponse toBillListResponse(BillResponse bill) {
+        if (bill == null) {
+            return null;
+        }
+        BillListAccountResponse account = null;
+        if (bill.getAccount() != null) {
+            account = new BillListAccountResponse(
+                    bill.getAccount().getAccountNumber(),
+                    bill.getAccount().getCustomerPhone()
+            );
+        }
+        return new BillListResponse(
+                bill.getId(),
+                bill.getInvoiceCode(),
+                bill.getAmount(),
+                bill.getCustomerName(),
+                bill.getDueDate(),
+                bill.getPaymentMode(),
+                account
+        );
+    }
+
+    private BillDetailResponse toBillDetailResponse(BillResponse bill) {
+        if (bill == null) {
+            return null;
+        }
+        return new BillDetailResponse(
+                bill.getId(),
+                bill.getInvoiceCode(),
+                bill.getAmount(),
+                bill.getCustomerName(),
+                bill.getDueDate(),
+                bill.getPaymentMode(),
+                bill.getItems(),
+                bill.getAccount()
+        );
+    }
+
+    private boolean isBillingExternalEnabled() {
+        return billingProperties != null
+                && billingProperties.isEnabled()
+                && StringUtils.hasText(billingProperties.getBaseUrl());
+    }
+
+    private Mono<List<BillResponse>> fetchExternalBills(String organizationId) {
+        String resolvedOrgId = trimToNull(organizationId);
+        if (!StringUtils.hasText(resolvedOrgId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Organization scope is required."));
+        }
+        return billingClient.get()
+                .uri(billingProperties.getAllBillsPath())
+                .header("tenant-Id", resolvedOrgId)
+                .retrieve()
+                .bodyToFlux(BillResponse.class)
+                .collectList()
+                .timeout(Duration.ofSeconds(billingProperties.getTimeoutSeconds()));
     }
 }

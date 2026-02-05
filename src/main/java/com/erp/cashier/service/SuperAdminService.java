@@ -191,7 +191,7 @@ public class SuperAdminService {
      * @return organization admin responses
      */
     public Flux<AdminUserResponse> listOrganizationAdmins() {
-        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, "
+        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, "
                 + "p.telegram_chat_id, p.country, p.phone, p.actif, "
                 + "a.role_type, a.organization_id, a.agency_id, "
                 + "o.id AS org_id, o.name AS org_name, o.country AS org_country, "
@@ -215,7 +215,7 @@ public class SuperAdminService {
      * @return admin responses
      */
     public Flux<AdminUserResponse> listAllAdmins() {
-        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, "
+        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, "
                 + "p.telegram_chat_id, p.country, p.phone, p.actif, "
                 + "a.role_type, a.organization_id AS admin_organization_id, a.agency_id AS admin_agency_id, "
                 + "ag.id AS agency_id, ag.name AS agency_name, ag.country AS agency_country, "
@@ -244,7 +244,7 @@ public class SuperAdminService {
      * @return organization admin response
      */
     public Mono<AdminUserResponse> getOrganizationAdmin(String personId) {
-        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, "
+        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, "
                 + "p.telegram_chat_id, p.country, p.phone, p.actif, "
                 + "a.role_type, a.organization_id, a.agency_id, "
                 + "o.id AS org_id, o.name AS org_name, o.country AS org_country, "
@@ -357,11 +357,11 @@ public class SuperAdminService {
             String currentOrganizationId = profile.getOrganizationId();
 
             Mono<Person> validatedPerson = validateUsernameChange(person, userName);
-            Mono<String> organizationValidation = validateOrganizationChange(organizationId);
+            Mono<Void> organizationValidation = validateOrganizationChange(organizationId).then();
 
-            return validatedPerson.zipWith(organizationValidation.defaultIfEmpty(null))
-                    .flatMap(tuple -> {
-                        Person updatedPerson = applyPersonUpdates(tuple.getT1(), request, userName, userFirstName);
+            return validatedPerson.flatMap(candidate -> organizationValidation.thenReturn(candidate))
+                    .flatMap(updatedPerson -> {
+                        updatedPerson = applyPersonUpdates(updatedPerson, request, userName, userFirstName);
                         updatedPerson.setActif(willBeActive);
 
                         String effectiveRole = roleType != null ? roleType : profile.getRoleType();
@@ -435,7 +435,7 @@ public class SuperAdminService {
             return Flux.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Missing organization scope."));
         }
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, ");
+        sql.append("SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, ");
         sql.append("p.telegram_chat_id, p.country, p.phone, p.actif, ");
         sql.append("a.role_type, a.organization_id AS admin_organization_id, a.agency_id AS admin_agency_id, ");
         sql.append("ag.id AS agency_id, ag.name AS agency_name, ag.country AS agency_country, ");
@@ -474,7 +474,7 @@ public class SuperAdminService {
         if (!StringUtils.hasText(organizationId)) {
             return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Missing organization scope."));
         }
-        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, "
+        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, "
                 + "p.telegram_chat_id, p.country, p.phone, p.actif, "
                 + "a.role_type, a.organization_id AS admin_organization_id, a.agency_id AS admin_agency_id, "
                 + "ag.id AS agency_id, ag.name AS agency_name, ag.country AS agency_country, "
@@ -613,13 +613,13 @@ public class SuperAdminService {
             String currentAgencyId = profile.getAgencyId();
 
             Mono<Person> validatedPerson = validateUsernameChange(person, userName);
-            Mono<Agency> agencyValidation = StringUtils.hasText(agencyId)
-                    ? validateAgencyAssignment(agencyId, organizationId)
+            Mono<Void> agencyValidation = StringUtils.hasText(agencyId)
+                    ? validateAgencyAssignment(agencyId, organizationId).then()
                     : Mono.empty();
 
-            return validatedPerson.zipWith(agencyValidation.defaultIfEmpty(null))
-                    .flatMap(tuple -> {
-                        Person updatedPerson = applyPersonUpdates(tuple.getT1(), request, userName, userFirstName);
+            return validatedPerson.flatMap(candidate -> agencyValidation.thenReturn(candidate))
+                    .flatMap(updatedPerson -> {
+                        updatedPerson = applyPersonUpdates(updatedPerson, request, userName, userFirstName);
                         updatedPerson.setActif(willBeActive);
 
                         String effectiveRole = roleType != null ? roleType : profile.getRoleType();
@@ -720,7 +720,7 @@ public class SuperAdminService {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Phone is required."));
         }
 
-        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, p.account_number, "
+        String sql = "SELECT p.id AS person_id, p.user_name, p.user_first_name, p.mail, "
                 + "p.telegram_chat_id, p.country, p.phone, p.actif, "
                 + "a.role_type, a.organization_id, a.agency_id "
                 + "FROM person p "
@@ -835,7 +835,7 @@ public class SuperAdminService {
             String agencyId,
             boolean isNew
     ) {
-        profile.setRoleType(roleType);
+        profile.setRoleType(AdminRoleResolver.normalizeRoleType(roleType, agencyId));
         profile.setOrganizationId(organizationId);
         profile.setAgencyId(agencyId);
 
@@ -860,9 +860,6 @@ public class SuperAdminService {
         }
         if (request.getMail() != null) {
             person.setMail(trimToNull(request.getMail()));
-        }
-        if (request.getAccountNumber() != null) {
-            person.setAccountNumber(trimToNull(request.getAccountNumber()));
         }
         if (request.getTelegramChatId() != null) {
             person.setTelegramChatId(trimToNull(request.getTelegramChatId()));
@@ -1123,7 +1120,7 @@ public class SuperAdminService {
                 row.get("user_name", String.class),
                 row.get("user_first_name", String.class),
                 row.get("mail", String.class),
-                row.get("account_number", String.class),
+                null,
                 row.get("telegram_chat_id", String.class),
                 row.get("country", String.class),
                 row.get("phone", String.class),

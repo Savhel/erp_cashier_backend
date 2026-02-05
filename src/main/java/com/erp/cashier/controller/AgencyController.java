@@ -50,7 +50,7 @@ public class AgencyController {
      * @return agencies
      */
     @GetMapping
-    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN') or hasAuthority('ROLE_ORGANIZATION_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN') or hasAuthority('ROLE_ORGANIZATION_ADMIN') or hasAuthority('ROLE_MANAGER')")
     public Flux<AgencyResponse> listAgencies(
             @RequestParam(value = "country", required = false) String country,
             @RequestParam(value = "town", required = false) String town,
@@ -78,7 +78,7 @@ public class AgencyController {
      * @return agency
      */
     @GetMapping("/{agencyId}")
-    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN') or hasAuthority('ROLE_ORGANIZATION_ADMIN')")
+    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN') or hasAuthority('ROLE_ORGANIZATION_ADMIN') or hasAuthority('ROLE_MANAGER')")
     public Mono<AgencyResponse> getAgency(
             @PathVariable("agencyId") String agencyId,
             Authentication authentication

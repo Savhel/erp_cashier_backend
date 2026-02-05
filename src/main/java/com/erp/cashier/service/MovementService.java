@@ -3,6 +3,7 @@ package com.erp.cashier.service;
 import com.erp.cashier.dto.CashRegisterSummaryResponse;
 import com.erp.cashier.dto.MovementAccountResponse;
 import com.erp.cashier.dto.MovementPartyResponse;
+import com.erp.cashier.dto.MovementPersonResponse;
 import com.erp.cashier.dto.MovementResponse;
 import com.erp.cashier.dto.MovementTransferRequest;
 import com.erp.cashier.dto.MovementTransferResponse;
@@ -49,6 +50,8 @@ public class MovementService {
     private final CashRegisterMovementRepository movementRepository;
     private final CashRegisterSessionRepository sessionRepository;
     private final TransactionalOperator transactionalOperator;
+    private final AccountingCashMovementService accountingService;
+    private final AuditService auditService;
 
     /**
      * Creates the movement service.
@@ -62,12 +65,16 @@ public class MovementService {
             R2dbcEntityTemplate entityTemplate,
             CashRegisterMovementRepository movementRepository,
             CashRegisterSessionRepository sessionRepository,
-            ReactiveTransactionManager transactionManager
+            ReactiveTransactionManager transactionManager,
+            AccountingCashMovementService accountingService,
+            AuditService auditService
     ) {
         this.entityTemplate = entityTemplate;
         this.movementRepository = movementRepository;
         this.sessionRepository = sessionRepository;
         this.transactionalOperator = TransactionalOperator.create(transactionManager);
+        this.accountingService = accountingService;
+        this.auditService = auditService;
     }
 
     /**
@@ -127,17 +134,29 @@ public class MovementService {
         return requireOpenSession(actorId)
                 .flatMap(session -> {
                     CashRegisterMovement movement = buildTransferMovement(session.getId(), amount, actorId);
-                    Mono<CashRegisterMovement> savedMovement = movementRepository.save(movement);
-                    Mono<BigDecimal> balance = savedMovement.then(calculateSessionBalance(session.getId()));
-                    Mono<CashRegisterSummaryResponse> register = fetchRegisterSummary(session.getCashRegisterId());
-                    Mono<MovementTransferResponse> flow = Mono.zip(balance, register)
-                            .map(tuple -> new MovementTransferResponse(
-                                    true,
-                                    "Transfer recorded.",
-                                    tuple.getT1(),
-                                    tuple.getT2()
-                            ));
-                    return transactionalOperator.transactional(flow);
+                    Mono<reactor.util.function.Tuple2<CashRegisterMovement, MovementTransferResponse>> flow =
+                            movementRepository.save(movement)
+                            .flatMap(saved -> Mono.zip(
+                                    calculateSessionBalance(session.getId()),
+                                    fetchRegisterSummary(session.getCashRegisterId())
+                            ).map(tuple -> reactor.util.function.Tuples.of(
+                                    saved,
+                                    new MovementTransferResponse(
+                                            true,
+                                            "Transfer recorded.",
+                                            tuple.getT1(),
+                                            tuple.getT2()
+                                    )
+                            )));
+
+                    return transactionalOperator.transactional(flow)
+                            .doOnSuccess(tupleSave -> accountingService.syncMovementAsync(
+                                    tupleSave.getT1(),
+                                    null,
+                                    null
+                            ))
+                            .doOnSuccess(tupleSave -> auditService.recordMovementEventAsync(tupleSave.getT1()))
+                            .map(reactor.util.function.Tuple2::getT2);
                 });
     }
 
@@ -303,12 +322,19 @@ public class MovementService {
             emitter = new MovementPartyResponse(emitterId, null, null, "account");
         }
 
+        String reasonDetail = row.get("reason_detail", String.class);
+        String reason = StringUtils.hasText(reasonDetail)
+                ? reasonDetail
+                : row.get("reason", String.class);
+
         return new MovementResponse(
                 row.get("id", String.class),
                 row.get("amount", BigDecimal.class),
                 row.get("sense", String.class),
-                row.get("reason", String.class),
+                reason,
                 row.get("external_reference", String.class),
+                row.get("is_accounted", Boolean.class),
+                row.get("payment_method", String.class),
                 row.get("create_on", LocalDateTime.class),
                 recipient,
                 emitter,
@@ -369,7 +395,11 @@ public class MovementService {
         if (!StringUtils.hasText(id) && !StringUtils.hasText(name) && !StringUtils.hasText(username)) {
             return null;
         }
-        return new MovementPartyResponse(id, name, username, role);
+        MovementPersonResponse person = null;
+        if (StringUtils.hasText(name) || StringUtils.hasText(username)) {
+            person = new MovementPersonResponse(name, username);
+        }
+        return new MovementPartyResponse(id, name, username, role, person);
     }
 
     private Mono<MovementResponse> findMovementById(String movementId) {
@@ -410,13 +440,17 @@ public class MovementService {
             String agencyId
     ) {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT m.id, m.amount, m.sense, m.reason, m.external_reference, m.create_on, ");
+        sql.append("SELECT m.id, m.amount, m.sense, m.reason, m.reason_detail, ");
+        sql.append("m.external_reference, m.is_accounted, m.payment_method, ");
+        sql.append("m.create_on, ");
         sql.append("m.recipient_id, m.emitter_id, ");
         sql.append("r.id AS register_id, r.town AS register_town, r.country AS register_country, ");
         sql.append("r.neighborhood AS register_neighborhood, ");
-        sql.append("rp.id AS recipient_person_id, rp.user_first_name AS recipient_first_name, ");
+        sql.append("rp.id AS recipient_person_id, ");
+        sql.append("rp.user_first_name AS recipient_first_name, ");
         sql.append("rp.user_name AS recipient_user_name, ");
-        sql.append("ep.id AS emitter_person_id, ep.user_first_name AS emitter_first_name, ");
+        sql.append("ep.id AS emitter_person_id, ");
+        sql.append("ep.user_first_name AS emitter_first_name, ");
         sql.append("ep.user_name AS emitter_user_name ");
         sql.append("FROM cash_register_movement m ");
         sql.append("JOIN cash_register_session s ON s.id = m.session_id ");
@@ -548,12 +582,14 @@ public class MovementService {
         movement.setSense("transfert");
         movement.setAmount(amount);
         movement.setReason(TRANSFER_REASON);
+        movement.setEmitterId(null);
         movement.setIsAccounted(Boolean.FALSE);
         movement.setEventTicketingDetails(Boolean.FALSE);
         movement.setExternalReference(null);
         movement.setCreateOn(LocalDateTime.now());
         movement.setCreateBy(trimToNull(actorId));
         movement.setIsDeleted(Boolean.FALSE);
+        movement.markNew();
         return movement;
     }
 

@@ -4,9 +4,11 @@ import com.erp.cashier.config.ThirdPartyProperties;
 import com.erp.cashier.dto.external.ThirdPartyAccountResponse;
 import com.erp.cashier.model.Account;
 import com.erp.cashier.model.CustomerProfile;
+import com.erp.cashier.model.Agency;
 import com.erp.cashier.model.Organization;
 import com.erp.cashier.model.Person;
 import com.erp.cashier.repository.AccountRepository;
+import com.erp.cashier.repository.AgencyRepository;
 import com.erp.cashier.repository.CustomerProfileRepository;
 import com.erp.cashier.repository.OrganizationRepository;
 import com.erp.cashier.repository.PersonRepository;
@@ -18,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -37,10 +39,13 @@ public class ThirdPartyAccountSyncScheduler {
     private static final String KIND_CUSTOMER = "CUSTOMER";
     private static final String KIND_SUPPLIER = "SUPPLIER";
     private static final String KIND_SALES_AGENT = "SALES_AGENT";
+    private static final int ORG_SYNC_CONCURRENCY = 1;
+    private static final int ACCOUNT_SYNC_CONCURRENCY = 1;
 
     private final ThirdPartyProperties properties;
     private final ThirdPartyAccountsClient accountsClient;
     private final OrganizationRepository organizationRepository;
+    private final AgencyRepository agencyRepository;
     private final PersonRepository personRepository;
     private final CustomerProfileRepository customerProfileRepository;
     private final AccountRepository accountRepository;
@@ -55,6 +60,7 @@ public class ThirdPartyAccountSyncScheduler {
      * @param properties third-party properties
      * @param accountsClient third-party accounts client
      * @param organizationRepository organization repository
+     * @param agencyRepository agency repository
      * @param personRepository person repository
      * @param customerProfileRepository customer profile repository
      * @param accountRepository account repository
@@ -66,16 +72,18 @@ public class ThirdPartyAccountSyncScheduler {
             ThirdPartyProperties properties,
             ThirdPartyAccountsClient accountsClient,
             OrganizationRepository organizationRepository,
+            AgencyRepository agencyRepository,
             PersonRepository personRepository,
             CustomerProfileRepository customerProfileRepository,
             AccountRepository accountRepository,
-            R2dbcEntityTemplate entityTemplate,
+            @Qualifier("thirdpartyEntityTemplate") R2dbcEntityTemplate entityTemplate,
             PasswordService passwordService,
             AuditService auditService
     ) {
         this.properties = properties;
         this.accountsClient = accountsClient;
         this.organizationRepository = organizationRepository;
+        this.agencyRepository = agencyRepository;
         this.personRepository = personRepository;
         this.customerProfileRepository = customerProfileRepository;
         this.accountRepository = accountRepository;
@@ -100,53 +108,55 @@ public class ThirdPartyAccountSyncScheduler {
             return;
         }
         LOGGER.info("Third-party sync started.");
-        auditService.recordEvent(
-                        "thirdparty_sync_start",
-                        null,
-                        Map.of("message", "Third-party sync started")
-                )
-                .onErrorResume(ex -> Mono.empty())
-                .subscribe();
 
         String email = StringUtils.trimWhitespace(properties.getEmail());
         String password = properties.getPassword();
-        if (!StringUtils.hasText(email) || !StringUtils.hasText(password)) {
-            running.set(false);
-            LOGGER.warn("Third-party sync skipped: missing credentials.");
-            auditService.recordEvent(
-                            "thirdparty_sync_skipped",
-                            null,
-                            Map.of("reason", "missing_credentials")
-                    )
-                    .onErrorResume(ex -> Mono.empty())
-                    .subscribe();
-            return;
-        }
 
-        accountsClient.login(email, password)
-                .flatMapMany(this::syncOrganizations)
-                .doOnError(ex -> {
-                    LOGGER.error("Third-party sync failed.", ex);
-                    auditService.recordEvent(
-                                    "thirdparty_sync_failed",
-                                    null,
-                                    Map.of("error", String.valueOf(ex.getMessage()))
-                            )
-                            .onErrorResume(inner -> Mono.empty())
-                            .subscribe();
+        Mono<Void> syncFlow = safeAudit(
+                        "thirdparty_sync_start",
+                        Map.of("message", "Third-party sync started")
+                )
+                .then(Mono.defer(() -> {
+                    if (!StringUtils.hasText(email) || !StringUtils.hasText(password)) {
+                        LOGGER.warn("Third-party sync skipped: missing credentials.");
+                        return safeAudit(
+                                "thirdparty_sync_skipped",
+                                Map.of("reason", "missing_credentials")
+                        );
+                    }
+                    return accountsClient.login(email, password)
+                            .flatMapMany(this::syncOrganizations)
+                            .then();
+                }))
+                .materialize()
+                .flatMap(signal -> {
+                    Mono<Void> failureAudit = Mono.empty();
+                    if (signal.isOnError()) {
+                        Throwable ex = signal.getThrowable();
+                        LOGGER.error("Third-party sync failed.", ex);
+                        failureAudit = safeAudit(
+                                "thirdparty_sync_failed",
+                                Map.of("error", String.valueOf(ex != null ? ex.getMessage() : null))
+                        );
+                    }
+                    Mono<Void> finishedAudit = safeAudit(
+                            "thirdparty_sync_finished",
+                            Map.of("signal", String.valueOf(signal.getType()))
+                    );
+                    if (signal.isOnError()) {
+                        Throwable ex = signal.getThrowable();
+                        return failureAudit
+                                .then(finishedAudit)
+                                .then(Mono.error(ex != null ? ex : new RuntimeException("Third-party sync failed")));
+                    }
+                    return failureAudit.then(finishedAudit);
                 })
                 .doFinally(signal -> {
                     running.set(false);
                     LOGGER.info("Third-party sync finished.");
-                    auditService.recordEvent(
-                                    "thirdparty_sync_finished",
-                                    null,
-                                    Map.of("signal", String.valueOf(signal))
-                            )
-                            .onErrorResume(ex -> Mono.empty())
-                            .subscribe();
-                })
-                .subscribe();
+                });
+
+        syncFlow.subscribe();
     }
 
     private Flux<Void> syncOrganizations(String token) {
@@ -156,20 +166,41 @@ public class ThirdPartyAccountSyncScheduler {
                 .collectList()
                 .flatMapMany(organizationIds -> {
                     LOGGER.info("Third-party sync found {} organizations.", organizationIds.size());
-                    auditService.recordEvent(
+                    return safeAudit(
                                     "thirdparty_sync_orgs",
-                                    null,
                                     Map.of("count", organizationIds.size())
                             )
-                            .onErrorResume(ex -> Mono.empty())
-                            .subscribe();
-                    return Flux.fromIterable(organizationIds);
+                            .thenMany(Flux.fromIterable(organizationIds));
                 })
-                .concatMap(orgId -> syncOrganizationAccounts(token, orgId));
+                .flatMap(orgId -> syncOrganizationAccounts(token, orgId), ORG_SYNC_CONCURRENCY);
     }
 
     private Mono<Void> syncOrganizationAccounts(String token, String organizationId) {
-        return accountsClient.listAccounts(token, organizationId)
+        return agencyRepository.findByOrganizationIdAndIsActiveOrderByNameAsc(organizationId, Boolean.TRUE)
+                .map(Agency::getId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collectList()
+                .flatMapMany(agencyIds -> {
+                    if (agencyIds.isEmpty()) {
+                        LOGGER.info("Third-party accounts skipped org={} reason=no_agencies", organizationId);
+                        return safeAudit(
+                                        "thirdparty_sync_accounts_skipped",
+                                        Map.of("organization_id", organizationId, "reason", "no_agencies")
+                                )
+                                .thenMany(Flux.empty());
+                    }
+                    LOGGER.info(
+                            "Third-party accounts org={} agencies={}",
+                            organizationId,
+                            agencyIds.size()
+                    );
+                    return safeAudit(
+                                    "thirdparty_sync_accounts_request",
+                                    Map.of("organization_id", organizationId, "agency_count", agencyIds.size())
+                            )
+                            .thenMany(accountsClient.listAccountsByAgencies(token, agencyIds));
+                })
                 .collectList()
                 .flatMapMany(accounts -> {
                     LOGGER.info(
@@ -177,16 +208,13 @@ public class ThirdPartyAccountSyncScheduler {
                             organizationId,
                             accounts.size()
                     );
-                    auditService.recordEvent(
+                    return safeAudit(
                                     "thirdparty_sync_accounts",
-                                    null,
                                     Map.of("organization_id", organizationId, "count", accounts.size())
                             )
-                            .onErrorResume(ex -> Mono.empty())
-                            .subscribe();
-                    return Flux.fromIterable(accounts);
+                            .thenMany(Flux.fromIterable(accounts));
                 })
-                .concatMap(account -> syncAccount(account, organizationId)
+                .flatMap(account -> syncAccount(account, organizationId)
                         .onErrorResume(ex -> {
                             LOGGER.warn(
                                     "Third-party account sync failed for org={} code={}",
@@ -198,11 +226,8 @@ public class ThirdPartyAccountSyncScheduler {
                             payload.put("organization_id", organizationId);
                             payload.put("code", account != null ? account.getCode() : null);
                             payload.put("error", String.valueOf(ex.getMessage()));
-                            auditService.recordEvent("thirdparty_sync_account_failed", null, payload)
-                                    .onErrorResume(inner -> Mono.empty())
-                                    .subscribe();
-                            return Mono.empty();
-                        }))
+                            return safeAudit("thirdparty_sync_account_failed", payload);
+                        }), ACCOUNT_SYNC_CONCURRENCY)
                 .then();
     }
 
@@ -217,86 +242,47 @@ public class ThirdPartyAccountSyncScheduler {
         if (KIND_SALES_AGENT.equals(kind)) {
             return syncSalesAgentAccount(account, organizationId);
         }
-        return Mono.empty();
+        return syncCustomerAccount(account, organizationId);
     }
 
     private Mono<Void> syncCustomerAccount(ThirdPartyAccountResponse account, String organizationId) {
-        String code = trimToNull(account.getCode());
-        if (!StringUtils.hasText(code)) {
-            LOGGER.debug("Third-party account skipped: missing code (org={})", organizationId);
-            return Mono.empty();
-        }
+        return syncPersonProfileAccount(account, organizationId);
+    }
+
+    private Mono<Void> syncPersonProfileAccount(ThirdPartyAccountResponse account, String organizationId) {
         return upsertCustomerPerson(account)
-                .flatMap(person -> upsertCustomerProfile(account, person))
-                .flatMap(profile -> upsertAccount(account, profile))
+                .flatMap(person -> upsertCustomerProfile(account, person)
+                        .flatMap(profile -> upsertAccount(account, profile, organizationId)))
                 .then();
     }
 
     private Mono<Person> upsertCustomerPerson(ThirdPartyAccountResponse account) {
-        String externalId = trimToNull(account.getId());
+        String externalId = trimToNull(account.getTenantId());
         String code = trimToNull(account.getCode());
         String name = trimToNull(account.getName());
 
-        Mono<Person> lookup = Mono.empty();
-        if (StringUtils.hasText(externalId)) {
-            lookup = personRepository.findById(externalId);
-        }
-        if (StringUtils.hasText(code)) {
-            Mono<Person> byCode = personRepository.findByAccountNumber(code)
-                    .switchIfEmpty(personRepository.findByUserName(code));
-            lookup = lookup.switchIfEmpty(byCode);
+        if (!StringUtils.hasText(externalId)) {
+            LOGGER.warn("Third-party person skipped: missing tenant-id (code={})", code);
+            return Mono.empty();
         }
 
-        Mono<Person> updatedMono = lookup.flatMap(existing -> {
-            boolean updated = false;
-            if (StringUtils.hasText(code) && !code.equals(existing.getUserName())) {
-                existing.setUserName(code);
-                updated = true;
-            }
-            if (StringUtils.hasText(code) && !code.equals(existing.getAccountNumber())) {
-                existing.setAccountNumber(code);
-                updated = true;
-            }
-            if (StringUtils.hasText(name) && !name.equals(existing.getUserFirstName())) {
-                existing.setUserFirstName(name);
-                updated = true;
-            }
-            if (existing.getActif() == null || !existing.getActif()) {
-                existing.setActif(Boolean.TRUE);
-                updated = true;
-            }
-            return updated ? personRepository.save(existing) : Mono.just(existing);
-        });
+        Mono<Person> lookup = personRepository.findById(externalId);
         Mono<Person> createdMono = Mono.defer(() -> {
             Person person = new Person();
-            person.setId(StringUtils.hasText(externalId) ? externalId : UUID.randomUUID().toString());
-            person.setUserName(StringUtils.hasText(code) ? code : person.getId());
-            person.setAccountNumber(code);
+            person.setId(externalId);
+            person.setUserName(StringUtils.hasText(code) ? code : externalId);
             person.setUserFirstName(name);
             person.setActif(Boolean.TRUE);
             person.setPassword(passwordService.hashPassword(UUID.randomUUID().toString()));
             return entityTemplate.insert(Person.class).using(person);
         });
-        return updatedMono.switchIfEmpty(createdMono);
+        return lookup.switchIfEmpty(createdMono);
     }
 
     private Mono<CustomerProfile> upsertCustomerProfile(ThirdPartyAccountResponse account, Person person) {
         String kind = normalizeKind(account.getKind());
         String personId = person.getId();
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-        Mono<CustomerProfile> updatedMono = customerProfileRepository.findByPersonId(personId)
-                .flatMap(existing -> {
-                    boolean updated = false;
-                    if (StringUtils.hasText(kind) && !kind.equals(existing.getProfession())) {
-                        existing.setProfession(kind);
-                        updated = true;
-                    }
-                    if (existing.getDateOfJoining() == null) {
-                        existing.setDateOfJoining(now);
-                        updated = true;
-                    }
-                    return updated ? customerProfileRepository.save(existing) : Mono.just(existing);
-                });
         Mono<CustomerProfile> createdMono = Mono.defer(() -> {
             CustomerProfile profile = new CustomerProfile();
             profile.setId(UUID.randomUUID().toString());
@@ -305,115 +291,57 @@ public class ThirdPartyAccountSyncScheduler {
             profile.setDateOfJoining(now);
             return entityTemplate.insert(CustomerProfile.class).using(profile);
         });
-        return updatedMono.switchIfEmpty(createdMono);
+        return customerProfileRepository.findByPersonIdAndProfession(personId, kind)
+                .switchIfEmpty(createdMono);
     }
 
-    private Mono<Account> upsertAccount(ThirdPartyAccountResponse account, CustomerProfile profile) {
-        String externalId = trimToNull(account.getId());
-        String code = trimToNull(account.getCode());
+    private Mono<Account> upsertAccount(
+            ThirdPartyAccountResponse account,
+            CustomerProfile profile,
+            String organizationId
+    ) {
         String accounting = trimToNull(account.getAccountingAccount());
+        String bankAccount = trimToNull(account.getBankAccountNumber());
+        String orgId = trimToNull(organizationId);
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-        Mono<Account> lookup = Mono.empty();
-        if (StringUtils.hasText(externalId)) {
-            lookup = accountRepository.findById(externalId);
+        if (!StringUtils.hasText(bankAccount)) {
+            LOGGER.debug("Third-party account skipped: missing bankAccountNumber (org={})", organizationId);
+            return Mono.empty();
         }
-        if (StringUtils.hasText(code)) {
-            lookup = lookup.switchIfEmpty(accountRepository.findByAccountNumber(code));
-        }
-        Mono<Account> updatedMono = lookup.flatMap(existing -> {
-            boolean updated = false;
-            if (StringUtils.hasText(code) && !code.equals(existing.getAccountNumber())) {
-                existing.setAccountNumber(code);
-                updated = true;
-            }
-            if (StringUtils.hasText(accounting)
-                    && !accounting.equals(existing.getAccountingAccount())) {
-                existing.setAccountingAccount(accounting);
-                updated = true;
-            }
-            if (StringUtils.hasText(profile.getId())
-                    && !profile.getId().equals(existing.getClientId())) {
-                existing.setClientId(profile.getId());
-                updated = true;
-            }
-            if (existing.getIsActive() == null) {
-                existing.setIsActive(Boolean.TRUE);
-                updated = true;
-            }
-            return updated ? accountRepository.save(existing) : Mono.just(existing);
-        });
-        Mono<Account> createdMono = Mono.defer(() -> {
-            Account accountModel = new Account();
-            accountModel.setId(StringUtils.hasText(externalId) ? externalId : UUID.randomUUID().toString());
-            accountModel.setClientId(profile.getId());
-            accountModel.setAccountNumber(code);
-            accountModel.setAccountingAccount(accounting);
-            accountModel.setIsActive(Boolean.TRUE);
-            accountModel.setCreateOn(now);
-            accountModel.setTotalFunds(0.0);
-            return entityTemplate.insert(Account.class).using(accountModel);
-        });
-        return updatedMono.switchIfEmpty(createdMono);
+        return accountRepository.findByAccountNumber(bankAccount)
+                .switchIfEmpty(Mono.defer(() -> {
+                    Account accountModel = new Account();
+                    accountModel.setId(UUID.randomUUID().toString());
+                    accountModel.setClientId(profile.getId());
+                    accountModel.setAccountNumber(bankAccount);
+                    accountModel.setAccountingAccount(accounting);
+                    accountModel.setIsActive(Boolean.TRUE);
+                    accountModel.setCreateOn(now);
+                    accountModel.setTotalFunds(0.0);
+                    accountModel.setOrganizationId(orgId);
+                    return entityTemplate.insert(Account.class).using(accountModel);
+                }));
     }
 
     private Mono<Void> syncSalesAgentAccount(ThirdPartyAccountResponse account, String organizationId) {
-        String code = trimToNull(account.getCode());
-        String externalId = trimToNull(account.getId());
-        String accounting = trimToNull(account.getAccountingAccount());
-        String bankAccount = trimToNull(account.getBankAccountNumber());
-        if (!StringUtils.hasText(code)
-                && !StringUtils.hasText(externalId)
-                && !StringUtils.hasText(accounting)
-                && !StringUtils.hasText(bankAccount)) {
-            return Mono.empty();
-        }
-        String sql = "UPDATE cash_register r "
-                + "SET sale_agent_bank_account = CASE "
-                + "WHEN :bankAccount IS NULL OR :bankAccount = '' THEN r.sale_agent_bank_account "
-                + "ELSE :bankAccount END, "
-                + "sale_agent_accounting_account = CASE "
-                + "WHEN :accounting IS NULL OR :accounting = '' THEN r.sale_agent_accounting_account "
-                + "ELSE :accounting END "
-                + "FROM agency a "
-                + "WHERE r.agency_id = a.id "
-                + "AND a.organization_id = :organizationId "
-                + "AND ("
-                + "(:externalId IS NOT NULL AND r.id = :externalId) "
-                + "OR (:code IS NOT NULL AND r.cashier = :code) "
-                + "OR (:accounting IS NOT NULL AND r.sale_agent_accounting_account = :accounting) "
-                + "OR (:bankAccount IS NOT NULL AND r.sale_agent_bank_account = :bankAccount)"
-                + ")";
-        DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient()
-                .sql(sql)
-                .bind("organizationId", organizationId);
-        spec = bindNullable(spec, "externalId", externalId);
-        spec = bindNullable(spec, "code", code);
-        spec = bindNullable(spec, "accounting", accounting);
-        spec = bindNullable(spec, "bankAccount", bankAccount);
-        return spec.fetch()
-                .rowsUpdated()
-                .doOnNext(count -> {
-                    if (count > 0) {
-                        LOGGER.info(
-                                "Updated {} cash registers for sales agent {} in org {}",
-                                count,
-                                code,
-                                organizationId
-                        );
-                    }
+        return syncSalesAgentPersonAccount(account, organizationId)
+                .onErrorResume(ex -> {
+                    LOGGER.warn(
+                            "Third-party sales agent account sync failed for org={} code={}",
+                            organizationId,
+                            account != null ? account.getCode() : null,
+                            ex
+                    );
+                    return Mono.empty();
                 })
                 .then();
     }
 
-    private DatabaseClient.GenericExecuteSpec bindNullable(
-            DatabaseClient.GenericExecuteSpec spec,
-            String name,
-            String value
-    ) {
-        if (value == null) {
-            return spec.bindNull(name, String.class);
+    private Mono<Void> syncSalesAgentPersonAccount(ThirdPartyAccountResponse account, String organizationId) {
+        if (account == null) {
+            return Mono.empty();
         }
-        return spec.bind(name, value);
+        return syncPersonProfileAccount(account, organizationId);
     }
 
     private String normalizeKind(String kind) {
@@ -426,5 +354,10 @@ public class ThirdPartyAccountSyncScheduler {
             return null;
         }
         return value.trim();
+    }
+
+    private Mono<Void> safeAudit(String type, Object payload) {
+        return auditService.recordEvent(type, null, payload)
+                .onErrorResume(ex -> Mono.empty());
     }
 }

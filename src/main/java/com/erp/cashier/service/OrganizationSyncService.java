@@ -526,7 +526,7 @@ public class OrganizationSyncService {
         AdminProfile profile = new AdminProfile();
         profile.setId(UUID.randomUUID().toString());
         profile.setPersonId(personId);
-        profile.setRoleType(roleType);
+        profile.setRoleType(AdminRoleResolver.normalizeRoleType(roleType, agencyId));
         profile.setOrganizationId(organizationId);
         profile.setAgencyId(agencyId);
         return entityTemplate.insert(AdminProfile.class).using(profile).then();
@@ -539,11 +539,16 @@ public class OrganizationSyncService {
             String roleType
     ) {
         boolean updated = false;
-        if (StringUtils.hasText(roleType)
+        String resolvedAgencyId = StringUtils.hasText(agencyId) ? agencyId : existing.getAgencyId();
+        String resolvedRoleType = AdminRoleResolver.normalizeRoleType(
+                StringUtils.hasText(roleType) ? roleType : existing.getRoleType(),
+                resolvedAgencyId
+        );
+        if (StringUtils.hasText(resolvedRoleType)
                 && (existing.getRoleType() == null
                 || !"superadmin".equalsIgnoreCase(existing.getRoleType()))
-                && !roleType.equalsIgnoreCase(existing.getRoleType())) {
-            existing.setRoleType(roleType);
+                && !resolvedRoleType.equalsIgnoreCase(existing.getRoleType())) {
+            existing.setRoleType(resolvedRoleType);
             updated = true;
         }
         if (StringUtils.hasText(organizationId) && !organizationId.equals(existing.getOrganizationId())) {
@@ -681,8 +686,13 @@ public class OrganizationSyncService {
             agency.setLocationHint(location);
         }
         Boolean isActive = readBoolean(payload, "isActive");
+        if (isActive == null) {
+            isActive = readBoolean(payload, "is_active");
+        }
         if (isActive != null) {
             agency.setIsActive(isActive);
+        } else if (agency.getIsActive() == null) {
+            agency.setIsActive(Boolean.TRUE);
         }
         agency.setRequiresAdminAssignment(Boolean.FALSE);
         String externalOrgId = trimToNull(readString(payload, "organizationId"));

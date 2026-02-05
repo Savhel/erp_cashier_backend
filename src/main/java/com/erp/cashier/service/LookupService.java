@@ -91,7 +91,7 @@ public class LookupService {
                                 person.getId(),
                                 person.getUserName(),
                                 person.getUserFirstName(),
-                                person.getAccountNumber(),
+                                null,
                                 person.getCountry(),
                                 person.getMail(),
                                 person.getPhone(),

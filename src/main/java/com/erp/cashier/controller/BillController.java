@@ -1,9 +1,10 @@
 package com.erp.cashier.controller;
 
+import com.erp.cashier.dto.BillDetailResponse;
+import com.erp.cashier.dto.BillListResponse;
 import com.erp.cashier.dto.BillPageResponse;
 import com.erp.cashier.dto.BillPaymentRequest;
 import com.erp.cashier.dto.BillPaymentResponse;
-import com.erp.cashier.dto.BillResponse;
 import com.erp.cashier.security.JwtPayload;
 import com.erp.cashier.service.BillService;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -46,8 +47,8 @@ public class BillController {
      */
     @GetMapping("/cashier/bills")
     @PreAuthorize("hasAuthority('ROLE_CASHIER')")
-    public Flux<BillResponse> listCashierBills(Authentication authentication) {
-        return billService.listCashierBills(resolveUserId(authentication));
+    public Flux<BillListResponse> listCashierBills(Authentication authentication) {
+        return billService.listCashierBills(resolveOrganizationId(authentication));
     }
 
     /**
@@ -59,11 +60,11 @@ public class BillController {
      */
     @GetMapping("/cashier/bills/{id}")
     @PreAuthorize("hasAuthority('ROLE_CASHIER')")
-    public Mono<BillResponse> getCashierBill(
+    public Mono<BillDetailResponse> getCashierBill(
             @PathVariable("id") String billId,
             Authentication authentication
     ) {
-        return billService.getCashierBill(billId, resolveUserId(authentication));
+        return billService.getCashierBill(billId, resolveOrganizationId(authentication));
     }
 
     /**
@@ -107,6 +108,17 @@ public class BillController {
         Object details = authentication.getDetails();
         if (details instanceof JwtPayload payload) {
             return payload.getUserId();
+        }
+        return null;
+    }
+
+    private String resolveOrganizationId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getOrganizationId();
         }
         return null;
     }

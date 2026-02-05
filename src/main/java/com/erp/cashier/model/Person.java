@@ -21,9 +21,6 @@ public class Person {
     @Column("user_name")
     private String userName;
 
-    @Column("account_number")
-    private String accountNumber;
-
     @Column("password")
     private String password;
 

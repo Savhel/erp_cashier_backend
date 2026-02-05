@@ -155,6 +155,7 @@ public class SessionController {
         return sessionAdminService.setSessionLocked(
                         sessionId,
                         true,
+                        resolveUserId(authentication),
                         organizationId,
                         agencyId,
                         restrictToAgency,
@@ -183,6 +184,7 @@ public class SessionController {
         return sessionAdminService.setSessionLocked(
                         sessionId,
                         false,
+                        resolveUserId(authentication),
                         organizationId,
                         agencyId,
                         restrictToAgency,

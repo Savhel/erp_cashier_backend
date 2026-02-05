@@ -18,6 +18,7 @@ public class UpdateAgencyRequest {
     private String locationHint;
     private Boolean isActive;
     private Boolean requiresAdminAssignment;
+    private String telegramBotToken;
 
     /**
      * Default constructor for JSON serialization.

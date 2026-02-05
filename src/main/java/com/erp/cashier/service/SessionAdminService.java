@@ -8,9 +8,9 @@ import com.erp.cashier.dto.SessionCashRegisterResponse;
 import com.erp.cashier.dto.SessionMovementResponse;
 import com.erp.cashier.dto.SessionReconciliationResponse;
 import com.erp.cashier.dto.SessionResponse;
-import com.erp.cashier.model.CashRegisterEvent;
 import com.erp.cashier.model.CashRegisterSession;
 import com.erp.cashier.model.CashReconciliation;
+import com.erp.cashier.repository.CashRegisterSessionRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.r2dbc.spi.Row;
@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -46,8 +47,10 @@ public class SessionAdminService {
     private static final String STATE_CLOSING = "en_cloture";
 
     private final R2dbcEntityTemplate entityTemplate;
+    private final CashRegisterSessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
     private final TransactionalOperator transactionalOperator;
+    private final AuditService auditService;
 
     /**
      * Creates the session admin service.
@@ -55,15 +58,20 @@ public class SessionAdminService {
      * @param entityTemplate entity template
      * @param objectMapper object mapper
      * @param transactionManager reactive transaction manager
+     * @param auditService audit service
      */
     public SessionAdminService(
             R2dbcEntityTemplate entityTemplate,
+            CashRegisterSessionRepository sessionRepository,
             ObjectMapper objectMapper,
-            ReactiveTransactionManager transactionManager
+            ReactiveTransactionManager transactionManager,
+            AuditService auditService
     ) {
         this.entityTemplate = entityTemplate;
+        this.sessionRepository = sessionRepository;
         this.objectMapper = objectMapper;
         this.transactionalOperator = TransactionalOperator.create(transactionManager);
+        this.auditService = auditService;
     }
 
     /**
@@ -217,7 +225,7 @@ public class SessionAdminService {
                         assertCashierNoOpenSession(openBy),
                         assertRegisterNoActiveSession(registerId)
                 ))
-                .then(createSession(registerId, openBy, initialFunds))
+                .then(createSession(registerId, openBy, initialFunds, resolvedActorId))
                 .flatMap(this::fetchSessionById);
     }
 
@@ -256,7 +264,7 @@ public class SessionAdminService {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Actor ID is required"));
         }
 
-        return findSessionEntity(resolvedSessionId)
+        return resolveSessionForClose(resolvedSessionId)
                 .flatMap(session -> assertSessionScope(
                                 session.getCashRegisterId(),
                                 organizationId,
@@ -285,17 +293,35 @@ public class SessionAdminService {
                         ));
                     }
 
-                    session.setState(STATE_CLOSING);
-                    session.setCloseOn(LocalDateTime.now());
-                    session.setCloseBy(resolvedActorId);
-                    session.setTheoricalCloseFunds(physicalTotal);
+                    return computeTheoricalTotal(session)
+                            .flatMap(theoricalTotal -> {
+                                session.setState(STATE_CLOSING);
+                                session.setCloseOn(LocalDateTime.now());
+                                session.setCloseBy(resolvedActorId);
+                                session.setTheoricalCloseFunds(theoricalTotal);
 
-                    Mono<String> updateFlow = entityTemplate.update(session)
-                            .map(CashRegisterSession::getId)
-                            .flatMap(id -> insertReconciliation(id, physicalTotal, resolvedActorId).thenReturn(id));
+                                Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                                putIfPresent(payload, "open_by", session.getOpenBy());
+                                putIfPresent(payload, "close_by", resolvedActorId);
+                                putIfPresent(payload, "physical_total", physicalTotal);
+                                putIfPresent(payload, "theorical_total", theoricalTotal);
 
-                    return transactionalOperator.transactional(updateFlow)
-                            .flatMap(this::fetchSessionById);
+                                Mono<String> updateFlow = entityTemplate.update(session)
+                                        .map(CashRegisterSession::getId)
+                                        .flatMap(id -> insertReconciliation(id, physicalTotal, theoricalTotal, resolvedActorId)
+                                                .thenReturn(id))
+                                        .flatMap(id -> recordSessionEvent(
+                                                "fermeture",
+                                                id,
+                                                session.getCashRegisterId(),
+                                                resolvedActorId,
+                                                payload,
+                                                "session:" + id + ":close"
+                                        ).thenReturn(id));
+
+                                return transactionalOperator.transactional(updateFlow)
+                                        .flatMap(this::fetchSessionById);
+                            });
                 });
     }
 
@@ -304,6 +330,7 @@ public class SessionAdminService {
      *
      * @param sessionId session identifier
      * @param locked lock flag
+     * @param actorId authenticated user identifier
      * @param organizationId organization identifier when scoped
      * @param agencyId agency identifier when scoped
      * @param restrictToAgency true when scoped to an agency
@@ -313,6 +340,7 @@ public class SessionAdminService {
     public Mono<SessionResponse> setSessionLocked(
             String sessionId,
             boolean locked,
+            String actorId,
             String organizationId,
             String agencyId,
             boolean restrictToAgency,
@@ -322,6 +350,7 @@ public class SessionAdminService {
         if (!StringUtils.hasText(resolvedSessionId)) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Session ID is required."));
         }
+        String resolvedActorId = trimToNull(actorId);
         return findSessionEntity(resolvedSessionId)
                 .flatMap(session -> assertSessionScope(
                                 session.getCashRegisterId(),
@@ -333,7 +362,19 @@ public class SessionAdminService {
                         .thenReturn(session))
                 .flatMap(session -> {
                     session.setIsLocked(locked);
-                    return entityTemplate.update(session).map(CashRegisterSession::getId);
+                    Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                    putIfPresent(payload, "locked", locked);
+                    putIfPresent(payload, "changed_by", resolvedActorId);
+                    return entityTemplate.update(session)
+                            .map(CashRegisterSession::getId)
+                            .flatMap(id -> recordSessionEvent(
+                                    locked ? "verrouillage" : "deverrouillage",
+                                    id,
+                                    session.getCashRegisterId(),
+                                    resolvedActorId,
+                                    payload,
+                                    "session:" + id + ":lock:" + locked
+                            ).thenReturn(id));
                 })
                 .flatMap(this::fetchSessionById);
     }
@@ -401,7 +442,12 @@ public class SessionAdminService {
                 .then();
     }
 
-    private Mono<String> createSession(String registerId, String openBy, BigDecimal initialFunds) {
+    private Mono<String> createSession(
+            String registerId,
+            String openBy,
+            BigDecimal initialFunds,
+            String authorId
+    ) {
         CashRegisterSession session = new CashRegisterSession();
         session.setId(UUID.randomUUID().toString());
         session.setCashRegisterId(registerId);
@@ -411,42 +457,121 @@ public class SessionAdminService {
         session.setTheoricalInitialFunds(initialFunds);
         session.setIsLocked(false);
 
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        putIfPresent(payload, "open_by", openBy);
+        putIfPresent(payload, "initial_funds", initialFunds);
+
         Mono<String> insertFlow = entityTemplate.insert(CashRegisterSession.class)
                 .using(session)
                 .map(saved -> saved.getId())
-                .flatMap(sessionId -> insertOpenEvent(sessionId, openBy, initialFunds)
+                .flatMap(sessionId -> recordSessionEvent(
+                        "ouverture",
+                        sessionId,
+                        registerId,
+                        StringUtils.hasText(authorId) ? authorId : openBy,
+                        payload,
+                        "session:" + sessionId + ":open"
+                )
                         .thenReturn(sessionId));
 
         return transactionalOperator.transactional(insertFlow);
     }
 
-    private Mono<Void> insertOpenEvent(String sessionId, String authorId, BigDecimal initialFunds) {
-        String payload = serializePayload(Map.of("initial_funds", initialFunds));
-        CashRegisterEvent event = new CashRegisterEvent();
-        event.setId(UUID.randomUUID().toString());
-        event.setSessionId(sessionId);
-        event.setType("ouverture");
-        event.setAuthorId(authorId);
-        event.setPayload(payload);
-        event.setDateTime(LocalDateTime.now());
-        return entityTemplate.insert(CashRegisterEvent.class)
-                .using(event)
-                .then();
+    private Mono<Void> recordSessionEvent(
+            String type,
+            String sessionId,
+            String cashRegisterId,
+            String authorId,
+            Map<String, Object> payload,
+            String idempotency
+    ) {
+        if (!StringUtils.hasText(sessionId)) {
+            return Mono.empty();
+        }
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        if (payload != null) {
+            data.putAll(payload);
+        }
+        putIfPresent(data, "session_id", sessionId);
+        putIfPresent(data, "cash_register_id", cashRegisterId);
+        return auditService.recordSubjectEvent(
+                type,
+                authorId,
+                sessionId,
+                null,
+                "session",
+                sessionId,
+                idempotency,
+                data
+        ).onErrorResume(ex -> Mono.empty());
     }
 
-    private Mono<Void> insertReconciliation(String sessionId, BigDecimal physicalTotal, String authorId) {
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (payload == null || !StringUtils.hasText(key) || value == null) {
+            return;
+        }
+        payload.put(key, value);
+    }
+
+    private Mono<Void> insertReconciliation(
+            String sessionId,
+            BigDecimal physicalTotal,
+            BigDecimal theoricalTotal,
+            String authorId
+    ) {
         CashReconciliation reconciliation = new CashReconciliation();
         reconciliation.setId(UUID.randomUUID().toString());
         reconciliation.setSessionId(sessionId);
         reconciliation.setPhysicalTotal(physicalTotal);
-        reconciliation.setTheoricalTotal(physicalTotal);
-        reconciliation.setDifference(BigDecimal.ZERO);
+        reconciliation.setTheoricalTotal(theoricalTotal);
+        reconciliation.setDifference(physicalTotal.subtract(theoricalTotal));
         reconciliation.setStatut("en_attente");
         reconciliation.setCreateOn(LocalDateTime.now());
         reconciliation.setCreateBy(authorId);
         return entityTemplate.insert(CashReconciliation.class)
                 .using(reconciliation)
                 .then();
+    }
+
+    private Mono<CashRegisterSession> resolveSessionForClose(String sessionOrRegisterId) {
+        return sessionRepository.findById(sessionOrRegisterId)
+                .switchIfEmpty(sessionRepository.findLatestByRegisterAndState(sessionOrRegisterId, STATE_OPEN))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Session not found."
+                )));
+    }
+
+    private Mono<BigDecimal> computeTheoricalTotal(CashRegisterSession session) {
+        String sessionId = session != null ? session.getId() : null;
+        BigDecimal initial = session != null && session.getTheoricalInitialFunds() != null
+                ? session.getTheoricalInitialFunds()
+                : BigDecimal.ZERO;
+        if (!StringUtils.hasText(sessionId)) {
+            return Mono.just(initial);
+        }
+        String sql = "SELECT "
+                + "COALESCE(SUM(CASE WHEN sense = 'entree' THEN amount ELSE 0 END), 0) AS total_in, "
+                + "COALESCE(SUM(CASE WHEN sense = 'sortie' THEN amount ELSE 0 END), 0) AS total_out "
+                + "FROM cash_register_movement "
+                + "WHERE session_id = :sessionId "
+                + "AND (is_deleted = false OR is_deleted IS NULL)";
+        return entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("sessionId", sessionId)
+                .map((row, meta) -> {
+                    BigDecimal totalIn = row.get("total_in", BigDecimal.class);
+                    BigDecimal totalOut = row.get("total_out", BigDecimal.class);
+                    if (totalIn == null) {
+                        totalIn = BigDecimal.ZERO;
+                    }
+                    if (totalOut == null) {
+                        totalOut = BigDecimal.ZERO;
+                    }
+                    return initial.add(totalIn).subtract(totalOut);
+                })
+                .one()
+                .defaultIfEmpty(initial);
     }
 
     private Mono<CashRegisterSession> findSessionEntity(String sessionId) {
@@ -529,14 +654,15 @@ public class SessionAdminService {
         Mono<List<SessionMovementResponse>> movements = fetchMovements(session.getId()).collectList();
         Mono<List<CashRegisterTicketingDetailResponse>> ticketing = fetchTicketingDetails(session.getId())
                 .collectList();
-        Mono<SessionReconciliationResponse> reconciliation = fetchReconciliation(session.getId())
-                .defaultIfEmpty(null);
+        Mono<Optional<SessionReconciliationResponse>> reconciliation = fetchReconciliation(session.getId())
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
 
         return Mono.zip(movements, ticketing, reconciliation)
                 .map(tuple -> {
                     session.setMovements(tuple.getT1());
                     session.setTicketingDetails(tuple.getT2());
-                    session.setReconciliation(tuple.getT3());
+                    session.setReconciliation(tuple.getT3().orElse(null));
                     return session;
                 });
     }

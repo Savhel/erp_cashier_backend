@@ -19,6 +19,7 @@ public class CreateAgencyRequest {
     private Boolean isActive;
     private Boolean requiresAdminAssignment;
     private String organizationId;
+    private String telegramBotToken;
 
     /**
      * Default constructor for JSON serialization.

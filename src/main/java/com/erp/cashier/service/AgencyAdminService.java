@@ -92,7 +92,7 @@ public class AgencyAdminService {
 
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT a.id, a.name, a.country, a.town, a.neighborhood, a.address, a.location_hint, ");
-        sql.append("a.is_active, a.requires_admin_assignment, a.organization_id, a.create_on, ");
+        sql.append("a.is_active, a.requires_admin_assignment, a.organization_id, a.telegram_bot_token, a.create_on, ");
         sql.append("EXISTS (SELECT 1 FROM cash_register_session s ");
         sql.append("JOIN cash_register r ON r.id = s.cash_register_id ");
         sql.append("WHERE r.agency_id = a.id AND (s.state = :openState OR s.is_locked = true)) ");
@@ -221,6 +221,7 @@ public class AgencyAdminService {
                 request.getRequiresAdminAssignment() != null ? request.getRequiresAdminAssignment() : Boolean.FALSE
         );
         agency.setOrganizationId(resolvedOrganizationId);
+        agency.setTelegramBotToken(trimToNull(request.getTelegramBotToken()));
         agency.setCreateOn(LocalDateTime.now());
 
         return ensureOrganizationExists(resolvedOrganizationId)
@@ -303,6 +304,9 @@ public class AgencyAdminService {
                     }
                     if (request.getRequiresAdminAssignment() != null) {
                         agency.setRequiresAdminAssignment(request.getRequiresAdminAssignment());
+                    }
+                    if (request.getTelegramBotToken() != null) {
+                        agency.setTelegramBotToken(trimToNull(request.getTelegramBotToken()));
                     }
                     return entityTemplate.update(agency)
                             .map(updated -> toResponse(updated, Boolean.FALSE, new ArrayList<>()));
@@ -417,7 +421,7 @@ public class AgencyAdminService {
     ) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT a.id, a.name, a.country, a.town, a.neighborhood, a.address, a.location_hint, ");
-        sql.append("a.is_active, a.requires_admin_assignment, a.organization_id, a.create_on, ");
+        sql.append("a.is_active, a.requires_admin_assignment, a.organization_id, a.telegram_bot_token, a.create_on, ");
         sql.append("EXISTS (SELECT 1 FROM cash_register_session s ");
         sql.append("JOIN cash_register r ON r.id = s.cash_register_id ");
         sql.append("WHERE r.agency_id = a.id AND (s.state = :openState OR s.is_locked = true)) ");
@@ -496,6 +500,7 @@ public class AgencyAdminService {
                 row.get("is_active", Boolean.class),
                 row.get("requires_admin_assignment", Boolean.class),
                 row.get("organization_id", String.class),
+                row.get("telegram_bot_token", String.class),
                 row.get("create_on", LocalDateTime.class),
                 row.get("has_blocking_session", Boolean.class),
                 row.get("register_id", String.class),
@@ -531,6 +536,7 @@ public class AgencyAdminService {
                 first.isActive(),
                 first.requiresAdminAssignment(),
                 first.organizationId(),
+                first.telegramBotToken(),
                 first.createOn(),
                 first.hasBlockingSession(),
                 registers
@@ -553,6 +559,7 @@ public class AgencyAdminService {
                 agency.getIsActive(),
                 agency.getRequiresAdminAssignment(),
                 agency.getOrganizationId(),
+                agency.getTelegramBotToken(),
                 agency.getCreateOn(),
                 hasBlockingSession,
                 cashRegisters
@@ -575,6 +582,7 @@ public class AgencyAdminService {
             Boolean isActive,
             Boolean requiresAdminAssignment,
             String organizationId,
+            String telegramBotToken,
             LocalDateTime createOn,
             Boolean hasBlockingSession,
             String registerId,
