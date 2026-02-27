@@ -37,8 +37,7 @@ public class ErrorNotificationService {
 
     public ErrorNotificationService(
             @Qualifier("r2dbcEntityTemplate") R2dbcEntityTemplate entityTemplate,
-            WebClient.Builder webClientBuilder
-    ) {
+            WebClient.Builder webClientBuilder) {
         this.entityTemplate = entityTemplate;
         this.webClient = webClientBuilder
                 .baseUrl("https://api.telegram.org")
@@ -62,6 +61,29 @@ public class ErrorNotificationService {
                     LOGGER.debug("Error notification failed", err);
                     return Mono.empty();
                 });
+    }
+
+    /**
+     * Sends a direct fund-request notification to agency admins.
+     *
+     * @param agencyId agency identifier
+     * @param message message body
+     * @return completion signal
+     */
+    public Mono<Void> notifyAgencyFundRequest(String agencyId, String message) {
+        String resolvedAgencyId = trim(agencyId);
+        if (!StringUtils.hasText(resolvedAgencyId) || !StringUtils.hasText(message)) {
+            return Mono.empty();
+        }
+        return findAgencyAdminTargets(resolvedAgencyId)
+                .filter(TelegramTarget::isValid)
+                .distinct(TelegramTarget::key)
+                .flatMap(target -> sendTelegram(target, message))
+                .onErrorResume(err -> {
+                    LOGGER.debug("Fund request notification failed", err);
+                    return Mono.empty();
+                })
+                .then();
     }
 
     private Mono<Void> dispatchNotification(JwtPayload payload, ServerWebExchange exchange, Throwable ex) {
@@ -147,8 +169,7 @@ public class ErrorNotificationService {
                 .bind("organizationId", organizationId)
                 .map((row, meta) -> new TelegramTarget(
                         row.get("telegram_chat_id", String.class),
-                        row.get("org_bot_token", String.class)
-                ))
+                        row.get("org_bot_token", String.class)))
                 .all();
     }
 

@@ -12,9 +12,13 @@ import com.erp.cashier.dto.CashierCustomerResponse;
 import com.erp.cashier.dto.CreateCustomerRequest;
 import com.erp.cashier.dto.CreateCustomerResponse;
 import com.erp.cashier.dto.CustomerResponse;
+import com.erp.cashier.dto.FundRequestCreateResponse;
+import com.erp.cashier.dto.FundRequestFundingResponse;
+import com.erp.cashier.dto.FundRequestProvisionRequest;
 import com.erp.cashier.dto.FundRequestResponse;
 import com.erp.cashier.security.JwtPayload;
 import com.erp.cashier.service.AccountService;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -214,7 +218,7 @@ public class AccountController {
      */
     @PostMapping("/cashier/fund-requests")
     @PreAuthorize("hasAuthority('ROLE_CASHIER')")
-    public Mono<AccountP2PTransferResponse> requestFunds(
+    public Mono<FundRequestCreateResponse> requestFunds(
             @RequestBody CashierFundRequest request,
             Authentication authentication
     ) {
@@ -228,11 +232,33 @@ public class AccountController {
      * @return fund requests
      */
     @GetMapping("/cashier/fund-requests")
-    @PreAuthorize("hasAuthority('ROLE_CASHIER')")
+    @PreAuthorize("hasAnyAuthority('ROLE_CASHIER', 'ROLE_ADMIN')")
     public Flux<FundRequestResponse> listFundRequests(Authentication authentication) {
         return accountService.listFundRequests(
                 resolveUserId(authentication),
                 resolveAgencyId(authentication)
+        );
+    }
+
+    /**
+     * Adds funds to a pending cashier fund request with ticketing.
+     *
+     * @param requestId request identifier
+     * @param request funding payload
+     * @param authentication authentication payload
+     * @return funding response
+     */
+    @PostMapping("/cashier/fund-requests/{requestId}/fund")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public Mono<FundRequestFundingResponse> fundCashierRequest(
+            @PathVariable("requestId") String requestId,
+            @RequestBody FundRequestProvisionRequest request,
+            Authentication authentication
+    ) {
+        return accountService.fulfillFundRequest(
+                requestId,
+                request,
+                resolveUserId(authentication)
         );
     }
 

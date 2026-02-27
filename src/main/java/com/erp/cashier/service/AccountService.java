@@ -25,6 +25,9 @@ import com.erp.cashier.dto.CashRegisterTicketingDenominationResponse;
 import com.erp.cashier.dto.CreateCustomerRequest;
 import com.erp.cashier.dto.CreateCustomerResponse;
 import com.erp.cashier.dto.CustomerResponse;
+import com.erp.cashier.dto.FundRequestCreateResponse;
+import com.erp.cashier.dto.FundRequestFundingResponse;
+import com.erp.cashier.dto.FundRequestProvisionRequest;
 import com.erp.cashier.dto.FundRequestResponse;
 import com.erp.cashier.dto.PaymentMethod;
 import com.erp.cashier.dto.PersonDetailResponse;
@@ -34,6 +37,7 @@ import com.erp.cashier.model.CashRegister;
 import com.erp.cashier.model.CashRegisterMovement;
 import com.erp.cashier.model.CashRegisterSession;
 import com.erp.cashier.model.CustomerProfile;
+import com.erp.cashier.model.EventTicketingDetail;
 import com.erp.cashier.model.Person;
 import com.erp.cashier.repository.AccountRepository;
 import com.erp.cashier.repository.CashRegisterMovementRepository;
@@ -44,9 +48,11 @@ import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -71,6 +77,9 @@ import reactor.util.function.Tuples;
 @Service
 public class AccountService {
     private static final String STATE_OPEN = "ouverte";
+    private static final String FUND_REQUEST_REASON = "fund request";
+    private static final String FUND_REQUEST_TICKETING_CONNECTION = "fund_request_addition";
+    private static final String ROLE_TYPE_AGENCY_ADMIN = "agency_admin";
 
     private final PersonRepository personRepository;
     private final CustomerProfileRepository customerProfileRepository;
@@ -81,6 +90,7 @@ public class AccountService {
     private final TransactionalOperator transactionalOperator;
     private final AccountingCashMovementService accountingService;
     private final AuditService auditService;
+    private final ErrorNotificationService errorNotificationService;
 
     /**
      * Creates the account service.
@@ -102,7 +112,8 @@ public class AccountService {
             R2dbcEntityTemplate entityTemplate,
             ReactiveTransactionManager transactionManager,
             AccountingCashMovementService accountingService,
-            AuditService auditService
+            AuditService auditService,
+            ErrorNotificationService errorNotificationService
     ) {
         this.personRepository = personRepository;
         this.customerProfileRepository = customerProfileRepository;
@@ -113,6 +124,7 @@ public class AccountService {
         this.transactionalOperator = TransactionalOperator.create(transactionManager);
         this.accountingService = accountingService;
         this.auditService = auditService;
+        this.errorNotificationService = errorNotificationService;
     }
 
     /**
@@ -225,6 +237,7 @@ public class AccountService {
      */
     public Flux<AdminAccountResponse> listAdminAccounts(String organizationId, String agencyId) {
         requireOrganization(organizationId);
+        String resolvedAgencyId = trimToNull(agencyId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT a.id AS account_id, a.account_number, a.total_funds, a.is_active, a.create_on, ");
         sql.append("p.id AS person_id, p.user_name, p.user_first_name ");
@@ -232,9 +245,11 @@ public class AccountService {
         sql.append("JOIN customer_profile cp ON cp.id = a.client_id ");
         sql.append("JOIN person p ON p.id = cp.person_id ");
         sql.append("WHERE a.organization_id = :organizationId ");
+        appendAdminAgencyScopeForAccount(sql, "a", resolvedAgencyId);
         sql.append("ORDER BY a.create_on DESC");
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient().sql(sql.toString())
                 .bind("organizationId", organizationId);
+        spec = bindAgencyIfPresent(spec, resolvedAgencyId);
         return spec.map((row, meta) -> {
                     BigDecimal totalFundsValue = row.get("total_funds", BigDecimal.class);
                     Double totalFunds = totalFundsValue != null ? totalFundsValue.doubleValue() : null;
@@ -265,6 +280,7 @@ public class AccountService {
      */
     public Flux<AdminCustomerResponse> listAdminCustomers(String organizationId, String agencyId) {
         requireOrganization(organizationId);
+        String resolvedAgencyId = trimToNull(agencyId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT cp.id AS customer_id, p.id AS person_id, p.user_name, p.user_first_name, ");
         sql.append("p.mail, p.country, p.phone, ");
@@ -274,10 +290,12 @@ public class AccountService {
         sql.append("JOIN person p ON p.id = cp.person_id ");
         sql.append("JOIN account a ON a.client_id = cp.id ");
         sql.append("AND a.organization_id = :organizationId ");
+        appendAdminAgencyScopeForAccount(sql, "a", resolvedAgencyId);
         sql.append("GROUP BY cp.id, p.id, p.user_name, p.user_first_name, p.mail, p.country, p.phone ");
         sql.append("ORDER BY p.user_first_name ASC");
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient().sql(sql.toString())
                 .bind("organizationId", organizationId);
+        spec = bindAgencyIfPresent(spec, resolvedAgencyId);
         return spec.map((row, meta) -> {
                     BigDecimal totalBalanceValue = row.get("total_balance", BigDecimal.class);
                     Number countValue = row.get("accounts_count", Number.class);
@@ -586,13 +604,13 @@ public class AccountService {
     }
 
     /**
-     * Requests cash funds from the oldest available cashier in the same agency.
+     * Creates a pending cashier fund request without ticketing.
      *
      * @param request fund request payload
      * @param actorId cashier identifier
-     * @return transfer response
+     * @return request response
      */
-    public Mono<AccountP2PTransferResponse> requestFunds(CashierFundRequest request, String actorId) {
+    public Mono<FundRequestCreateResponse> requestFunds(CashierFundRequest request, String actorId) {
         if (request == null) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request payload is required."));
         }
@@ -600,86 +618,138 @@ public class AccountService {
         if (amount == null || amount.signum() <= 0) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount must be positive"));
         }
+        if (hasTicketingDetails(request.getTicketing())) {
+            return Mono.error(new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Fund request creation does not accept ticketing."
+            ));
+        }
 
         return requireOpenSession(actorId)
                 .flatMap(requesterSession -> resolveRegisterForSession(requesterSession)
-                        .flatMap(requesterRegister -> findDonorSessionWithRegister(
-                                        requesterRegister.getAgencyId(),
-                                        requesterRegister.getId()
-                                )
-                                .flatMap(donorTuple -> {
-                                    CashRegisterSession donorSession = donorTuple.getT1();
-                                    CashRegister donorRegister = donorTuple.getT2();
-                                    String requesterMac = trimToNull(requesterRegister.getMacAddress());
-                                    String donorMac = trimToNull(donorRegister.getMacAddress());
-                                    if (!StringUtils.hasText(requesterMac) || !StringUtils.hasText(donorMac)) {
-                                        return Mono.error(new ResponseStatusException(
-                                                HttpStatus.BAD_REQUEST,
-                                                "Cash register MAC address is required."
-                                        ));
-                                    }
-                                    String reason = "fund request";
-                                    CashRegisterMovement outMovement = buildMovement(
-                                            donorSession.getId(),
-                                            "sortie",
-                                            amount,
-                                            reason,
-                                            request.getReason(),
-                                            donorMac,
-                                            requesterMac,
-                                            request.getTicketing(),
-                                            request.getReference(),
-                                            PaymentMethod.CASH,
-                                            actorId
-                                    );
-                                    CashRegisterMovement inMovement = buildMovement(
-                                            requesterSession.getId(),
-                                            "entree",
-                                            amount,
-                                            reason,
-                                            request.getReason(),
-                                            donorMac,
-                                            requesterMac,
-                                            request.getTicketing(),
-                                            request.getReference(),
-                                            PaymentMethod.CASH,
-                                            actorId
-                                    );
+                        .flatMap(requesterRegister -> {
+                            String requesterMac = trimToNull(requesterRegister.getMacAddress());
+                            if (!StringUtils.hasText(requesterMac)) {
+                                return Mono.error(new ResponseStatusException(
+                                        HttpStatus.BAD_REQUEST,
+                                        "Cash register MAC address is required."
+                                ));
+                            }
+                            CashRegisterMovement requestMovement = buildMovement(
+                                    requesterSession.getId(),
+                                    "entree",
+                                    amount,
+                                    FUND_REQUEST_REASON,
+                                    request.getReason(),
+                                    null,
+                                    requesterMac,
+                                    null,
+                                    request.getReference(),
+                                    PaymentMethod.CASH,
+                                    actorId
+                            );
+                            return transactionalOperator.transactional(movementRepository.save(requestMovement))
+                                    .flatMap(savedMovement -> notifyAgencyFundRequest(requesterRegister, savedMovement)
+                                            .thenReturn(savedMovement))
+                                    .doOnSuccess(savedMovement ->
+                                            auditService.recordMovementEventAsync(savedMovement))
+                                    .map(savedMovement -> new FundRequestCreateResponse(
+                                            true,
+                                            savedMovement.getId(),
+                                            savedMovement.getExternalReference(),
+                                            "pending",
+                                            savedMovement.getAmount(),
+                                            StringUtils.hasText(savedMovement.getReasonDetail())
+                                                    ? savedMovement.getReasonDetail()
+                                                    : savedMovement.getReason(),
+                                            toInstant(savedMovement.getCreateOn())
+                                    ));
+                        }));
+    }
 
-                                    Mono<Tuple3<CashRegisterMovement, CashRegisterMovement, AccountP2PTransferResponse>> flow =
-                                            movementRepository.save(outMovement)
-                                            .zipWith(movementRepository.save(inMovement))
-                                            .map(tupleSave -> Tuples.of(
-                                                    tupleSave.getT1(),
-                                                    tupleSave.getT2(),
-                                                    new AccountP2PTransferResponse(
-                                                            true,
-                                                            tupleSave.getT2().getId(),
-                                                            tupleSave.getT1().getId(),
-                                                            request.getReference()
+    /**
+     * Adds ticketed funds to an existing fund request.
+     *
+     * @param requestId fund request identifier
+     * @param request funding payload
+     * @param actorId admin identifier
+     * @return funding response
+     */
+    public Mono<FundRequestFundingResponse> fulfillFundRequest(
+            String requestId,
+            FundRequestProvisionRequest request,
+            String actorId
+    ) {
+        String resolvedRequestId = trimToNull(requestId);
+        if (!StringUtils.hasText(resolvedRequestId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "requestId is required"));
+        }
+        TicketingRequest ticketing = request != null ? request.getTicketing() : null;
+        if (ticketing == null) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "ticketing is required"));
+        }
+
+        return movementRepository.findById(resolvedRequestId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Fund request not found."
+                )))
+                .flatMap(movement -> {
+                    if (!FUND_REQUEST_REASON.equalsIgnoreCase(trimToNull(movement.getReason()))) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "Movement is not a fund request."
+                        ));
+                    }
+                    if (Boolean.TRUE.equals(movement.getEventTicketingDetails())) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "Fund request already funded."
+                        ));
+                    }
+                    if (!StringUtils.hasText(movement.getSessionId())) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "Fund request session is missing."
+                        ));
+                    }
+                    return sessionRepository.findById(movement.getSessionId())
+                            .switchIfEmpty(Mono.error(new ResponseStatusException(
+                                    HttpStatus.NOT_FOUND,
+                                    "Session not found."
+                            )))
+                            .flatMap(session -> {
+                                if (!STATE_OPEN.equalsIgnoreCase(trimToNull(session.getState()))) {
+                                    return Mono.error(new ResponseStatusException(
+                                            HttpStatus.BAD_REQUEST,
+                                            "Session is not open."
+                                    ));
+                                }
+                                return resolveRegisterForSession(session)
+                                    .flatMap(requesterRegister -> assertAgencyAdminAccess(
+                                                    actorId,
+                                                    requesterRegister.getAgencyId()
+                                            )
+                                            .then(resolveSourceRegister(
+                                                    requesterRegister.getAgencyId(),
+                                                    request != null ? request.getSourceMacAddress() : null
+                                            ))
+                                            .flatMap(sourceRegister -> validateTicketing(
+                                                            ticketing,
+                                                            movement.getAmount()
                                                     )
+                                                    .flatMap(lines -> applyFundRequestFunding(
+                                                            movement,
+                                                            session,
+                                                            requesterRegister,
+                                                            sourceRegister,
+                                                            lines,
+                                                            request != null ? request.getReference() : null,
+                                                            actorId
+                                                    ))
                                             ));
-
-                                    String emitterAccounting = trimToNull(donorRegister.getSaleAgentAccountingAccount());
-                                    String recipientAccounting = trimToNull(requesterRegister.getSaleAgentAccountingAccount());
-
-                                    return transactionalOperator.transactional(flow)
-                                            .doOnSuccess(tupleSave -> {
-                                                accountingService.syncMovementAsync(
-                                                        tupleSave.getT1(),
-                                                        recipientAccounting,
-                                                        emitterAccounting
-                                                );
-                                                accountingService.syncMovementAsync(
-                                                        tupleSave.getT2(),
-                                                        recipientAccounting,
-                                                        emitterAccounting
-                                                );
-                                                auditService.recordMovementEventAsync(tupleSave.getT1());
-                                                auditService.recordMovementEventAsync(tupleSave.getT2());
-                                            })
-                                            .map(Tuple3::getT3);
-                                })));
+                            });
+                });
     }
 
     /**
@@ -884,29 +954,264 @@ public class AccountService {
                 )));
     }
 
-    private Mono<Tuple2<CashRegisterSession, CashRegister>> findDonorSessionWithRegister(
-            String requesterAgencyId,
-            String requesterRegisterId
-    ) {
-        String agencyId = trimToNull(requesterAgencyId);
-        if (!StringUtils.hasText(agencyId)) {
+    private Mono<Void> notifyAgencyFundRequest(CashRegister register, CashRegisterMovement movement) {
+        String agencyId = register != null ? trimToNull(register.getAgencyId()) : null;
+        if (!StringUtils.hasText(agencyId) || movement == null) {
+            return Mono.empty();
+        }
+        String message = buildFundRequestNotificationMessage(register, movement);
+        return errorNotificationService.notifyAgencyFundRequest(agencyId, message)
+                .onErrorResume(err -> Mono.empty());
+    }
+
+    private String buildFundRequestNotificationMessage(CashRegister register, CashRegisterMovement movement) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Cashier fund request\n");
+        builder.append("RequestId: ").append(trimToNull(movement.getId())).append("\n");
+        builder.append("AgencyId: ").append(trimToNull(register.getAgencyId())).append("\n");
+        builder.append("SessionId: ").append(trimToNull(movement.getSessionId())).append("\n");
+        builder.append("CashierId: ").append(trimToNull(movement.getCreateBy())).append("\n");
+        builder.append("Amount: ").append(movement.getAmount()).append("\n");
+        String reason = trimToNull(movement.getReasonDetail());
+        if (StringUtils.hasText(reason)) {
+            builder.append("Reason: ").append(reason).append("\n");
+        }
+        builder.append("Register MAC: ").append(trimToNull(register.getMacAddress()));
+        return builder.toString();
+    }
+
+    private Mono<Void> assertAgencyAdminAccess(String actorId, String agencyId) {
+        String resolvedActorId = trimToNull(actorId);
+        String resolvedAgencyId = trimToNull(agencyId);
+        if (!StringUtils.hasText(resolvedActorId) || !StringUtils.hasText(resolvedAgencyId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Agency scope is required."));
+        }
+        String sql = "SELECT id FROM admin_profile "
+                + "WHERE person_id = :actorId AND role_type = :roleType AND agency_id = :agencyId LIMIT 1";
+        return entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("actorId", resolvedActorId)
+                .bind("roleType", ROLE_TYPE_AGENCY_ADMIN)
+                .bind("agencyId", resolvedAgencyId)
+                .map((row, meta) -> row.get("id", String.class))
+                .first()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "Only agency admins can fund cashier requests for this agency."
+                )))
+                .then();
+    }
+
+    private Mono<SourceRegisterContext> resolveSourceRegister(String agencyId, String sourceMacAddress) {
+        String resolvedMacAddress = trimToNull(sourceMacAddress);
+        if (!StringUtils.hasText(resolvedMacAddress)) {
             return Mono.error(new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Agency scope is required."
+                    "source_mac_address is required"
             ));
         }
-        return sessionRepository.findOpenByAgency(agencyId, STATE_OPEN)
-                .filter(session -> !StringUtils.hasText(requesterRegisterId)
-                        || !requesterRegisterId.equals(session.getCashRegisterId()))
-                .concatMap(session -> resolveRegisterForSession(session)
-                        .filter(register -> agencyId.equals(register.getAgencyId()))
-                        .map(register -> Tuples.of(session, register))
-                )
-                .next()
+        String sql = "SELECT mac_address, sale_agent_accounting_account "
+                + "FROM cash_register WHERE agency_id = :agencyId AND mac_address = :macAddress LIMIT 1";
+        return entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("agencyId", agencyId)
+                .bind("macAddress", resolvedMacAddress)
+                .map((row, meta) -> new SourceRegisterContext(
+                        row.get("mac_address", String.class),
+                        row.get("sale_agent_accounting_account", String.class)
+                ))
+                .one()
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
-                        "No available cashier found in agency."
+                        "Source register is not in the cashier agency."
                 )));
+    }
+
+    private Mono<List<TicketingLine>> validateTicketing(TicketingRequest ticketing, BigDecimal expectedAmount) {
+        if (ticketing == null || ticketing.getDenominations() == null || ticketing.getDenominations().isEmpty()) {
+            return Mono.error(new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "ticketing denominations are required"
+            ));
+        }
+        return Flux.fromIterable(ticketing.getDenominations().entrySet())
+                .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "ticketing denominations are required"
+                )))
+                .flatMap(entry -> fetchDenomination(entry.getKey())
+                        .map(denomination -> {
+                            BigDecimal lineTotal = denomination.value().multiply(BigDecimal.valueOf(entry.getValue()));
+                            return new TicketingLine(
+                                    denomination.id(),
+                                    entry.getValue(),
+                                    denomination.value(),
+                                    lineTotal
+                            );
+                        })
+                )
+                .collectList()
+                .flatMap(lines -> {
+                    BigDecimal computedTotal = lines.stream()
+                            .map(TicketingLine::lineTotal)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    BigDecimal declaredTotal = ticketing.getTotal();
+                    if (declaredTotal != null && declaredTotal.compareTo(computedTotal) != 0) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "ticketing total mismatch"
+                        ));
+                    }
+                    if (expectedAmount != null && expectedAmount.compareTo(computedTotal) != 0) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "ticketing total must match fund request amount"
+                        ));
+                    }
+                    return Mono.just(lines);
+                });
+    }
+
+    private Mono<DenominationInfo> fetchDenomination(String denominationId) {
+        String resolvedDenominationId = trimToNull(denominationId);
+        if (!StringUtils.hasText(resolvedDenominationId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid denomination id."));
+        }
+        String sql = "SELECT id, value FROM currency_denomination WHERE id = :denominationId";
+        return entityTemplate.getDatabaseClient()
+                .sql(sql)
+                .bind("denominationId", resolvedDenominationId)
+                .map((row, meta) -> new DenominationInfo(
+                        row.get("id", String.class),
+                        row.get("value", BigDecimal.class)
+                ))
+                .one()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Denomination not found."
+                )));
+    }
+
+    private Mono<FundRequestFundingResponse> applyFundRequestFunding(
+            CashRegisterMovement movement,
+            CashRegisterSession session,
+            CashRegister requesterRegister,
+            SourceRegisterContext sourceRegister,
+            List<TicketingLine> lines,
+            String reference,
+            String actorId
+    ) {
+        BigDecimal amount = movement.getAmount() != null ? movement.getAmount() : BigDecimal.ZERO;
+        BigDecimal currentInitialFunds = session.getTheoricalInitialFunds() != null
+                ? session.getTheoricalInitialFunds()
+                : BigDecimal.ZERO;
+        BigDecimal newInitialFunds = currentInitialFunds.add(amount);
+        session.setTheoricalInitialFunds(newInitialFunds);
+
+        String requesterMac = trimToNull(requesterRegister.getMacAddress());
+        if (!StringUtils.hasText(requesterMac)) {
+            return Mono.error(new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Destination register MAC address is required."
+            ));
+        }
+        movement.setRecipientId(requesterMac);
+        movement.setEmitterId(trimToNull(sourceRegister.macAddress()));
+        movement.setExternalReference(StringUtils.hasText(reference)
+                ? trimToNull(reference)
+                : trimToNull(movement.getExternalReference()));
+        movement.setEventTicketingDetails(Boolean.TRUE);
+        movement.setPaymentMethod(PaymentMethod.CASH.name());
+        movement.setCreateBy(trimToNull(actorId));
+
+        String recipientAccounting = trimToNull(requesterRegister.getSaleAgentAccountingAccount());
+        String emitterAccounting = trimToNull(sourceRegister.accountingAccount());
+
+        CashRegisterMovement outMovement = buildMovement(
+                session.getId(),
+                "sortie",
+                amount,
+                FUND_REQUEST_REASON,
+                movement.getReasonDetail(),
+                trimToNull(sourceRegister.macAddress()),
+                requesterMac,
+                null,
+                trimToNull(reference) != null ? trimToNull(reference) : trimToNull(movement.getExternalReference()),
+                PaymentMethod.CASH,
+                actorId
+        );
+
+        Mono<Tuple2<CashRegisterMovement, CashRegisterMovement>> flow = sessionRepository.save(session)
+                .then(movementRepository.save(outMovement))
+                .flatMap(savedOutMovement -> movementRepository.save(movement)
+                        .flatMap(savedInMovement -> replaceMovementTicketingDetails(
+                                savedInMovement.getSessionId(),
+                                savedInMovement.getId(),
+                                lines
+                        ).thenReturn(Tuples.of(savedOutMovement, savedInMovement))));
+
+        BigDecimal ticketingTotal = lines.stream()
+                .map(TicketingLine::lineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return transactionalOperator.transactional(flow)
+                .doOnSuccess(tupleSave -> {
+                    CashRegisterMovement savedOut = tupleSave.getT1();
+                    CashRegisterMovement savedIn = tupleSave.getT2();
+                    accountingService.syncMovementAsync(savedOut, recipientAccounting, emitterAccounting);
+                    accountingService.syncMovementAsync(savedIn, recipientAccounting, emitterAccounting);
+                    auditService.recordMovementEventAsync(savedOut);
+                    auditService.recordMovementEventAsync(savedIn);
+                })
+                .map(tupleSave -> {
+                    CashRegisterMovement savedOut = tupleSave.getT1();
+                    CashRegisterMovement savedIn = tupleSave.getT2();
+                    return new FundRequestFundingResponse(
+                        true,
+                        savedIn.getId(),
+                        "funded",
+                        savedIn.getExternalReference(),
+                        savedIn.getId(),
+                        savedOut.getId(),
+                        savedIn.getSessionId(),
+                        toInstant(LocalDateTime.now()),
+                        currentInitialFunds,
+                        newInitialFunds,
+                        Boolean.TRUE,
+                        ticketingTotal
+                    );
+                });
+    }
+
+    private Mono<Void> replaceMovementTicketingDetails(
+            String sessionId,
+            String movementId,
+            List<TicketingLine> lines
+    ) {
+        if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(movementId)) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid fund request payload."));
+        }
+        String deleteSql = "DELETE FROM event_ticketing_detail WHERE movement_id = :movementId";
+        return entityTemplate.getDatabaseClient()
+                .sql(deleteSql)
+                .bind("movementId", movementId)
+                .fetch()
+                .rowsUpdated()
+                .thenMany(Flux.fromIterable(lines)
+                        .concatMap(line -> {
+                            EventTicketingDetail detail = new EventTicketingDetail();
+                            detail.setId(UUID.randomUUID().toString());
+                            detail.setSessionId(sessionId);
+                            detail.setConnectionType(FUND_REQUEST_TICKETING_CONNECTION);
+                            detail.setQuantity(line.quantity());
+                            detail.setValue(line.value());
+                            detail.setTotal(line.lineTotal());
+                            detail.setDenominationId(line.denominationId());
+                            detail.setMovementId(movementId);
+                            return entityTemplate.insert(EventTicketingDetail.class).using(detail);
+                        }))
+                .then();
     }
 
     private Flux<FundRequestResponse> listFundRequestsByAgency(String agencyId) {
@@ -935,7 +1240,7 @@ public class AccountService {
         return entityTemplate.getDatabaseClient()
                 .sql(sql)
                 .bind("agencyId", agencyId)
-                .bind("reason", "fund request")
+                .bind("reason", FUND_REQUEST_REASON)
                 .bind("sense", "entree")
                 .map(this::mapFundRequestRow)
                 .all()
@@ -1026,6 +1331,7 @@ public class AccountService {
         if (!StringUtils.hasText(accountId)) {
             return Flux.empty();
         }
+        String resolvedAgencyId = trimToNull(agencyId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT e.id, e.type, e.date_time, e.payload ");
         sql.append("FROM cash_register_event e ");
@@ -1035,10 +1341,18 @@ public class AccountService {
         sql.append("LEFT JOIN agency ag ON ag.id = r.agency_id ");
         sql.append("WHERE e.account_id = :accountId ");
         sql.append("AND a.organization_id = :organizationId ");
+        if (StringUtils.hasText(resolvedAgencyId)) {
+            sql.append("AND (r.agency_id = :agencyId ");
+            sql.append("OR EXISTS (SELECT 1 FROM admin_profile ap ");
+            sql.append("WHERE ap.person_id = a.create_by AND ap.agency_id = :agencyId) ");
+            sql.append("OR EXISTS (SELECT 1 FROM cashier_profile cp ");
+            sql.append("WHERE cp.person_id = a.create_by AND cp.base_agency_id = :agencyId)) ");
+        }
         sql.append("ORDER BY e.date_time DESC");
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient().sql(sql.toString())
                 .bind("accountId", accountId)
                 .bind("organizationId", organizationId);
+        spec = bindAgencyIfPresent(spec, resolvedAgencyId);
         return spec.map((row, meta) -> new AdminAccountEventResponse(
                         row.get("id", String.class),
                         row.get("type", String.class),
@@ -1056,6 +1370,7 @@ public class AccountService {
         if (!StringUtils.hasText(accountId)) {
             return Flux.empty();
         }
+        String resolvedAgencyId = trimToNull(agencyId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT m.id, m.amount, m.sense, m.reason, m.external_reference, ");
         sql.append("m.create_on, m.recipient_id, m.emitter_id, r.id AS register_id, ");
@@ -1069,10 +1384,14 @@ public class AccountService {
         sql.append("WHERE m.is_deleted = false ");
         sql.append("AND (m.recipient_id = :accountId OR m.emitter_id = :accountId) ");
         sql.append("AND ag.organization_id = :organizationId ");
+        if (StringUtils.hasText(resolvedAgencyId)) {
+            sql.append("AND r.agency_id = :agencyId ");
+        }
         sql.append("ORDER BY m.create_on DESC");
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient().sql(sql.toString())
                 .bind("accountId", accountId)
                 .bind("organizationId", organizationId);
+        spec = bindAgencyIfPresent(spec, resolvedAgencyId);
         return spec.map((row, meta) -> {
                     String registerId = row.get("register_id", String.class);
                     String registerTown = row.get("register_town", String.class);
@@ -1152,6 +1471,35 @@ public class AccountService {
         if (!StringUtils.hasText(organizationId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Organization scope is required.");
         }
+    }
+
+    private void appendAdminAgencyScopeForAccount(StringBuilder sql, String accountAlias, String agencyId) {
+        if (!StringUtils.hasText(agencyId)) {
+            return;
+        }
+        sql.append("AND (");
+        sql.append("EXISTS (SELECT 1 FROM cash_register_event e ");
+        sql.append("JOIN cash_register_session s2 ON s2.id = e.session_id ");
+        sql.append("JOIN cash_register r2 ON r2.id = s2.cash_register_id ");
+        sql.append("WHERE e.account_id = ").append(accountAlias).append(".id ");
+        sql.append("AND r2.agency_id = :agencyId) ");
+        sql.append("OR EXISTS (SELECT 1 FROM admin_profile ap ");
+        sql.append("WHERE ap.person_id = ").append(accountAlias).append(".create_by ");
+        sql.append("AND ap.agency_id = :agencyId) ");
+        sql.append("OR EXISTS (SELECT 1 FROM cashier_profile cp ");
+        sql.append("WHERE cp.person_id = ").append(accountAlias).append(".create_by ");
+        sql.append("AND cp.base_agency_id = :agencyId)");
+        sql.append(") ");
+    }
+
+    private DatabaseClient.GenericExecuteSpec bindAgencyIfPresent(
+            DatabaseClient.GenericExecuteSpec spec,
+            String agencyId
+    ) {
+        if (!StringUtils.hasText(agencyId)) {
+            return spec;
+        }
+        return spec.bind("agencyId", agencyId);
     }
 
     private AccountResponse toAccountResponse(
@@ -1304,15 +1652,18 @@ public class AccountService {
             String organizationId,
             String agencyId
     ) {
+        String resolvedAgencyId = trimToNull(agencyId);
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT a.id, a.account_number, a.total_funds, a.is_active, a.create_on ");
         sql.append("FROM account a ");
         sql.append("WHERE a.client_id = :customerId ");
         sql.append("AND a.organization_id = :organizationId ");
+        appendAdminAgencyScopeForAccount(sql, "a", resolvedAgencyId);
         sql.append("ORDER BY a.create_on DESC");
         DatabaseClient.GenericExecuteSpec spec = entityTemplate.getDatabaseClient().sql(sql.toString())
                 .bind("customerId", customerId)
                 .bind("organizationId", organizationId);
+        spec = bindAgencyIfPresent(spec, resolvedAgencyId);
         return spec.map((row, meta) -> new AdminCustomerAccountResponse(
                         row.get("id", String.class),
                         row.get("account_number", String.class),
@@ -1348,6 +1699,33 @@ public class AccountService {
             return null;
         }
         return value.trim();
+    }
+
+    private java.time.Instant toInstant(LocalDateTime value) {
+        if (value == null) {
+            return null;
+        }
+        return value.atOffset(ZoneOffset.UTC).toInstant();
+    }
+
+    private record SourceRegisterContext(
+            String macAddress,
+            String accountingAccount
+    ) {
+    }
+
+    private record DenominationInfo(
+            String id,
+            BigDecimal value
+    ) {
+    }
+
+    private record TicketingLine(
+            String denominationId,
+            Integer quantity,
+            BigDecimal value,
+            BigDecimal lineTotal
+    ) {
     }
 
     private static class CustomerSeed {

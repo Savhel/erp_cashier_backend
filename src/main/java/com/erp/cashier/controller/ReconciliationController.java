@@ -43,8 +43,11 @@ public class ReconciliationController {
      */
     @GetMapping("/admin/reconciliations")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Flux<ReconciliationResponse> listAdminReconciliations() {
-        return reconciliationService.listAdminReconciliations();
+    public Flux<ReconciliationResponse> listAdminReconciliations(Authentication authentication) {
+        return reconciliationService.listAdminReconciliations(
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -74,7 +77,13 @@ public class ReconciliationController {
             @RequestBody ReconciliationReviewRequest request,
             Authentication authentication
     ) {
-        return reconciliationService.reviewReconciliation(reconciliationId, request, resolveUserId(authentication));
+        return reconciliationService.reviewReconciliation(
+                reconciliationId,
+                request,
+                resolveUserId(authentication),
+                resolveOrganizationId(authentication),
+                resolveAgencyId(authentication)
+        );
     }
 
     /**
@@ -100,6 +109,28 @@ public class ReconciliationController {
         Object details = authentication.getDetails();
         if (details instanceof JwtPayload payload) {
             return payload.getUserId();
+        }
+        return null;
+    }
+
+    private String resolveAgencyId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getAgencyId();
+        }
+        return null;
+    }
+
+    private String resolveOrganizationId(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof JwtPayload payload) {
+            return payload.getOrganizationId();
         }
         return null;
     }
