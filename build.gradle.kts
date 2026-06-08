@@ -1,7 +1,7 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.3.2"
-    id("io.spring.dependency-management") version "1.1.6"
+    id("org.springframework.boot") version "4.0.0"
+    id("io.spring.dependency-management") version "1.1.7"
     checkstyle
     pmd
     jacoco
@@ -12,7 +12,7 @@ version = "0.1.0"
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
+        languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
 
@@ -59,7 +59,7 @@ dependencies {
     implementation("org.springframework.kafka:spring-kafka")
     implementation("io.projectreactor.kafka:reactor-kafka:1.3.23")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.5.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.0")
 
     implementation("io.jsonwebtoken:jjwt-api:0.11.5")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.11.5")
