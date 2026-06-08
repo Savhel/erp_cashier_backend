@@ -30,8 +30,13 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: iwm-kafka:29092
       # --- Secrets ---
       APP_JWT_SECRET: ${APP_JWT_SECRET:?Definir APP_JWT_SECRET}
-    ports:
-      - "${CASHIER_BACKEND_PUBLIC_PORT:-8094}:8081"
+    # Routé par Traefik (api-caisse.<IP>.nip.io) → plus de port hôte.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cashier-bff.rule=Host(`api-caisse.${PUBLIC_HOST:-localhost}`)"
+      - "traefik.http.routers.cashier-bff.entrypoints=web"
+      - "traefik.http.services.cashier-bff.loadbalancer.server.port=8081"
+      - "traefik.docker.network=cashier-net"
     networks:
       # Le BFF est le SEUL point d'intégration B2B : il parle à iwm (réseau infra)…
       - iwm
