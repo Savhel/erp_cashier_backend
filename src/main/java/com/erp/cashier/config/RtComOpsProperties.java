@@ -15,4 +15,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.rt")
 public class RtComOpsProperties {
     private String baseUrl = "http://localhost:8080";
+    /** Tenant par défaut injecté dans X-Tenant-Id lors du login délégué à iwm. */
+    private String tenantId = "11111111-1111-1111-1111-111111111111";
 }

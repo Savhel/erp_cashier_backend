@@ -21,6 +21,7 @@ import com.erp.cashier.repository.OrganizationRepository;
 import com.erp.cashier.repository.PersonRepository;
 import com.erp.cashier.security.JwtPayload;
 import com.erp.cashier.security.JwtService;
+import com.erp.cashier.security.KernelTokenRelayStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,9 +59,11 @@ public class AuthService {
     private final CashierProfileRepository cashierProfileRepository;
     private final CashRegisterSessionRepository sessionRepository;
     private final JwtService jwtService;
+    private final KernelTokenRelayStore kernelTokenRelayStore;
     private final R2dbcEntityTemplate entityTemplate;
     private final RtComOpsClient rtComOpsClient;
     private final AuditService auditService;
+    private final com.erp.cashier.config.CashierCoreProperties cashierCoreProperties;
 
     /**
      * Creates the authentication service.
@@ -82,9 +85,11 @@ public class AuthService {
             CashierProfileRepository cashierProfileRepository,
             CashRegisterSessionRepository sessionRepository,
             JwtService jwtService,
+            KernelTokenRelayStore kernelTokenRelayStore,
             R2dbcEntityTemplate entityTemplate,
             RtComOpsClient rtComOpsClient,
-            AuditService auditService
+            AuditService auditService,
+            com.erp.cashier.config.CashierCoreProperties cashierCoreProperties
     ) {
         this.organizationRepository = organizationRepository;
         this.agencyRepository = agencyRepository;
@@ -93,9 +98,32 @@ public class AuthService {
         this.cashierProfileRepository = cashierProfileRepository;
         this.sessionRepository = sessionRepository;
         this.jwtService = jwtService;
+        this.kernelTokenRelayStore = kernelTokenRelayStore;
         this.entityTemplate = entityTemplate;
         this.rtComOpsClient = rtComOpsClient;
         this.auditService = auditService;
+        this.cashierCoreProperties = cashierCoreProperties;
+    }
+
+    /**
+     * Login 100% délégué à iwm (mode façade traductrice, passthrough-all) : aucune table locale.
+     * Vérifie les identifiants + récupère le contexte caisse côté iwm, renvoie le JWT iwm dans la
+     * forme attendue par le front.
+     */
+    private Mono<LoginResponse> loginViaKernel(String email, String password) {
+        return rtComOpsClient.loginViaKernel(email, password)
+                .flatMap(result -> rtComOpsClient.fetchCashierContext(email, result.token())
+                        .map(ctx -> {
+                            LoginUserResponse user = new LoginUserResponse(
+                                    result.userId(),
+                                    StringUtils.hasText(result.username()) ? result.username() : email,
+                                    ctx.kind(),
+                                    ctx.kind(),
+                                    ctx.agencyId(),
+                                    ctx.organizationId());
+                            return new LoginResponse(true, user, result.token(), "Bearer",
+                                    jwtService.getAccessTokenTtlSeconds());
+                        }));
     }
 
     /**
@@ -116,17 +144,24 @@ public class AuthService {
             ));
         }
 
+        // Mode façade traductrice : tout passe par iwm, aucune table locale.
+        if (cashierCoreProperties.isPassthroughAll()) {
+            return loginViaKernel(email, request.getPassword());
+        }
+
         return rtComOpsClient.login(email, request.getPassword())
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED,
                         "Invalid credentials"
                 )))
-                .flatMap(response -> resolvePersonFromRt(response, email))
+                .flatMap(response -> resolvePersonFromRt(response, email)
+                        .map(person -> new AuthenticatedPerson(person, response.getToken())))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "User not found locally."
                 )))
-                .flatMap(this::buildLocalLoginResponse);
+                .flatMap(authenticated -> buildLocalLoginResponse(
+                        authenticated.person(), authenticated.kernelToken()));
     }
 
     /**
@@ -171,12 +206,12 @@ public class AuthService {
                 .thenReturn(new com.erp.cashier.dto.SuccessResponse(true));
     }
 
-    private Mono<LoginResponse> buildLocalLoginResponse(Person person) {
+    private Mono<LoginResponse> buildLocalLoginResponse(Person person, String kernelToken) {
         return resolveProfiles(person)
-                .flatMap(profile -> buildLoginResponse(person, profile));
+                .flatMap(profile -> buildLoginResponse(person, profile, kernelToken));
     }
 
-    private Mono<LoginResponse> buildLoginResponse(Person person, UserProfileContext profile) {
+    private Mono<LoginResponse> buildLoginResponse(Person person, UserProfileContext profile, String kernelToken) {
         LoginUserResponse loginUser = new LoginUserResponse(
                 person.getId(),
                 resolveUsername(person),
@@ -188,6 +223,7 @@ public class AuthService {
         return attachSalesAgentAccounts(loginUser)
                 .flatMap(enrichedUser -> {
                     String token = jwtService.generateAccessToken(enrichedUser);
+                    kernelTokenRelayStore.store(token, kernelToken);
                     long expiresIn = jwtService.getAccessTokenTtlSeconds();
                     LoginResponse response = new LoginResponse(
                             true,
@@ -197,7 +233,7 @@ public class AuthService {
                             expiresIn
                     );
                     return buildOrganizations(profile).map(organizations -> {
-                        response.setOrganizations(attachOrganizationTokens(person, organizations, profile));
+                        response.setOrganizations(attachOrganizationTokens(person, organizations, profile, kernelToken));
                         return response;
                     }).flatMap(resp -> recordAuthEvent("login", resp.getUser()).thenReturn(resp));
                 });
@@ -529,7 +565,8 @@ public class AuthService {
     private List<OrganizationMembershipResponse> attachOrganizationTokens(
             Person person,
             List<OrganizationMembershipResponse> organizations,
-            UserProfileContext profile
+            UserProfileContext profile,
+            String kernelToken
     ) {
         if (organizations == null || organizations.isEmpty()) {
             return organizations;
@@ -549,7 +586,9 @@ public class AuthService {
                     membership.getAgencyId(),
                     membership.getOrganizationId()
             );
-            membership.setAccessToken(jwtService.generateAccessToken(tokenUser));
+            String facadeToken = jwtService.generateAccessToken(tokenUser);
+            kernelTokenRelayStore.store(facadeToken, kernelToken);
+            membership.setAccessToken(facadeToken);
             enriched.add(membership);
         }
         return enriched;
@@ -607,4 +646,7 @@ public class AuthService {
 
     private record RoleInfo(String role, String roleType) {
     }
+    private record AuthenticatedPerson(Person person, String kernelToken) {
+    }
+
 }

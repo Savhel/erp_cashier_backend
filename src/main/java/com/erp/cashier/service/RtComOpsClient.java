@@ -39,8 +39,66 @@ public class RtComOpsClient {
      * @param webClientBuilder web client builder
      * @param properties RT_ComOps properties
      */
+    private final RtComOpsProperties properties;
+
     public RtComOpsClient(WebClient.Builder webClientBuilder, RtComOpsProperties properties) {
         this.webClient = webClientBuilder.baseUrl(properties.getBaseUrl()).build();
+        this.properties = properties;
+    }
+
+    /** Résultat normalisé du login délégué à iwm. */
+    public record KernelLoginResult(String token, String userId, String username) {}
+
+    /** Contexte caisse récupéré depuis iwm (self-profile). */
+    public record KernelCashierContext(String organizationId, String agencyId, String kind) {}
+
+    /**
+     * Login délégué à iwm (contrat /api/auth/login : principal + X-Tenant-Id, réponse ApiResponse.data).
+     * Renvoie le JWT iwm + l'identité de base. Aucune table locale.
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<KernelLoginResult> loginViaKernel(String email, String password) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("principal", email);
+        payload.put("password", password);
+        return webClient.post()
+                .uri("/api/auth/login")
+                .header("X-Tenant-Id", properties.getTenantId())
+                .bodyValue(payload)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, response -> response.bodyToMono(String.class).defaultIfEmpty("")
+                        .flatMap(body -> Mono.error(new ResponseStatusException(response.statusCode(),
+                                "iwm login failed: " + body))))
+                .bodyToMono(MAP_TYPE)
+                .map(body -> {
+                    Map<String, Object> data = body.get("data") instanceof Map ? (Map<String, Object>) body.get("data")
+                            : body;
+                    String token = str(data.get("accessToken"));
+                    if (!StringUtils.hasText(token)) {
+                        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "iwm login returned no token");
+                    }
+                    return new KernelLoginResult(token, str(data.get("id")), str(data.get("username")));
+                });
+    }
+
+    /** Récupère le contexte caisse de l'utilisateur courant depuis iwm (org, agence, kind). */
+    @SuppressWarnings("unchecked")
+    public Mono<KernelCashierContext> fetchCashierContext(String email, String token) {
+        return webClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/cashiers/self-profile")
+                        .queryParam("principalEmail", email).build())
+                .header("X-Tenant-Id", properties.getTenantId())
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, response -> Mono.empty())
+                .bodyToMono(MAP_TYPE)
+                .map(data -> new KernelCashierContext(
+                        str(data.get("organizationId")), str(data.get("agencyId")), str(data.get("kind"))))
+                .defaultIfEmpty(new KernelCashierContext(null, null, null));
+    }
+
+    private static String str(Object value) {
+        return value == null ? null : value.toString();
     }
 
     /**
