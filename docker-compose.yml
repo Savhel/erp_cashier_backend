@@ -30,9 +30,15 @@ services:
     ports:
       - "${CASHIER_BACKEND_PUBLIC_PORT:-8094}:8081"
     networks:
+      # Le BFF est le SEUL point d'intégration B2B : il parle à iwm (réseau infra)…
       - iwm
+      # …et expose son API au frontend via un réseau privé dédié (le front n'accède PAS à iwm).
+      - cashier
 
 networks:
   iwm:
     external: true
     name: iwm-vm-network
+  cashier:
+    name: cashier-net
+
