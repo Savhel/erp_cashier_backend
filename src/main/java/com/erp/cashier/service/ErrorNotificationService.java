@@ -240,7 +240,7 @@ public class ErrorNotificationService {
         return StringUtils.hasText(value) ? value.trim() : "";
     }
 
-    private record TelegramTarget(String chatId, String botToken) {
+    record TelegramTarget(String chatId, String botToken) {
         boolean isValid() {
             return StringUtils.hasText(chatId) && StringUtils.hasText(botToken);
         }
