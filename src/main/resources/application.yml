@@ -26,6 +26,12 @@ app:
         max-size: 10
   rt:
     base-url: ${RT_COMOPS_BASE_URL:http://localhost:8080}
+  cashier-core:
+    enabled: ${CASHIER_CORE_PROXY_ENABLED:true}
+    base-url: ${CASHIER_CORE_BASE_URL:${RT_COMOPS_BASE_URL:http://localhost:8080}}
+    # Mode pur proxy : tout /api/* relayé vers iwm (BFF sans logique/BD locale).
+    # Activer après validation runtime (auth iwm + toutes les routes).
+    passthrough-all: ${CASHIER_CORE_PASSTHROUGH_ALL:false}
   seed:
     superadmin:
       enabled: ${SEED_SUPERADMIN_ENABLED:true}

@@ -59,7 +59,11 @@ public class CashierCoreProxyWebFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
-        if (!properties.isEnabled() || !isCashierCoreRoute(path)) {
+        // Mode pur proxy : tout /api/* part vers iwm (le BFF n'exécute plus aucune logique locale).
+        boolean routed = properties.isPassthroughAll()
+                ? path.startsWith("/api/")
+                : isCashierCoreRoute(path);
+        if (!properties.isEnabled() || !routed) {
             return chain.filter(exchange);
         }
         ServerHttpRequest request = exchange.getRequest();
