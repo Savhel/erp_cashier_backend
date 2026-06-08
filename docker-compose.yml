@@ -7,10 +7,7 @@
 
 services:
   erp-cashier-backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: erp-cashier-backend:local
+    image: ${CASHIER_BACKEND_IMAGE:-ghcr.io/savhel/erp_cashier_backend:latest}
     container_name: erp-cashier-backend
     restart: unless-stopped
     environment:
