@@ -1,0 +1,11 @@
+.git
+.gradle
+build
+bin
+*.md
+*.pdf
+.idea
+.vscode
+docker-compose.yml
+.env
+.env.*

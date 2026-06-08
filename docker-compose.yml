@@ -1,0 +1,38 @@
+# Déploiement INDÉPENDANT du BFF caisse, branché sur l'infra partagée iwm (réseau iwm-vm-network).
+# Prérequis : la stack iwm tourne déjà, et la base "erp_cashier" existe :
+#   docker exec -it iwm-postgres psql -U iwm -c "CREATE DATABASE erp_cashier;"
+#
+#   cp .env.example .env   # renseigner les secrets
+#   docker compose up -d --build
+
+services:
+  erp-cashier-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: erp-cashier-backend:local
+    container_name: erp-cashier-backend
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8081"
+      # --- Base partagée (DB dédiée "erp_cashier") ---
+      SPRING_R2DBC_URL: r2dbc:postgresql://iwm-postgres:5432/${CASHIER_DB_NAME:-erp_cashier}
+      SPRING_R2DBC_USERNAME: ${IWM_DB_USER:-iwm}
+      SPRING_R2DBC_PASSWORD: ${IWM_DB_PASSWORD:?Definir IWM_DB_PASSWORD}
+      # --- Appels au Kernel iwm ---
+      RT_COMOPS_BASE_URL: http://iwm-app:8080
+      CASHIER_CORE_BASE_URL: http://iwm-app:8080
+      THIRDPARTY_BASE_URL: http://iwm-app:8080
+      # --- Kafka partagé ---
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: iwm-kafka:29092
+      # --- Secrets ---
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?Definir APP_JWT_SECRET}
+    ports:
+      - "${CASHIER_BACKEND_PUBLIC_PORT:-8094}:8081"
+    networks:
+      - iwm
+
+networks:
+  iwm:
+    external: true
+    name: iwm-vm-network
