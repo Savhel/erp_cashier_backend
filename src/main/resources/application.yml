@@ -26,6 +26,7 @@ app:
         max-size: 10
   rt:
     base-url: ${RT_COMOPS_BASE_URL:http://localhost:8080}
+    tenant-id: ${RT_TENANT_ID:11111111-1111-1111-1111-111111111111}
   cashier-core:
     enabled: ${CASHIER_CORE_PROXY_ENABLED:true}
     base-url: ${CASHIER_CORE_BASE_URL:${RT_COMOPS_BASE_URL:http://localhost:8080}}

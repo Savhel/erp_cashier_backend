@@ -23,6 +23,9 @@ services:
       RT_COMOPS_BASE_URL: http://iwm-app:8080
       CASHIER_CORE_BASE_URL: http://iwm-app:8080
       THIRDPARTY_BASE_URL: http://iwm-app:8080
+      # --- Mode façade pure : tout relayé vers iwm (auth incluse), aucune logique/BD locale ---
+      CASHIER_CORE_PASSTHROUGH_ALL: "${CASHIER_CORE_PASSTHROUGH_ALL:-false}"
+      RT_TENANT_ID: ${RT_TENANT_ID:-11111111-1111-1111-1111-111111111111}
       # --- Kafka partagé ---
       SPRING_KAFKA_BOOTSTRAP_SERVERS: iwm-kafka:29092
       # --- Secrets ---
