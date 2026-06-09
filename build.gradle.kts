@@ -41,10 +41,8 @@ jacoco {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-reactor-netty")
-    implementation("io.netty:netty-handler:4.1.111.Final")
-    implementation("io.netty:netty-codec-http:4.1.111.Final")
-    implementation("io.netty:netty-codec-http2:4.1.111.Final")
-    implementation("io.netty:netty-resolver-dns:4.1.111.Final")
+    // Netty : versions gérées par le BOM Spring Boot 4 (4.2.x). Ne PAS épingler en 4.1.x :
+    // reactor-netty 1.3 requiert Netty 4.2 (classe DnsNameResolverChannelStrategy).
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
